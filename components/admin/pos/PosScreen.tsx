@@ -43,14 +43,10 @@ import {
   Undo2,
   MoreHorizontal,
   Copy,
-  Trash2,
   Info,
-  Wallet,
   ArrowLeftRight,
-  CalendarClock,
   HandCoins,
   PercentCircle,
-  ShoppingCart,
   UserPlus,
   PanelRightOpen,
 } from "lucide-react";
@@ -135,8 +131,13 @@ export default function PosScreen() {
   const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
   const [showResponsibleModal, setShowResponsibleModal] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showFilter, setShowFilter] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(false); // mobile drawer
   const [stage, setStage] = useState<Stage>("shopping");
+
+  // ── Inline customer search (right panel) ────────────────
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
 
   // ── Submit state ─────────────────────────────────────────
   const [submitting, setSubmitting] = useState(false);
@@ -187,6 +188,18 @@ export default function PosScreen() {
     [users],
   );
 
+  // Inline search-as-you-type results for the right-panel customer field
+  const customerSearchResults = useMemo(() => {
+    if (customerQuery.trim().length < 1) return [];
+    return filteredCustomers
+      .filter(
+        (u) =>
+          matchesSearch(u.name, customerQuery) ||
+          (u.phone && u.phone.includes(customerQuery)),
+      )
+      .slice(0, 10);
+  }, [filteredCustomers, customerQuery]);
+
   // Outstanding nasiya balance per customer — derived from orders with paymentBreakdown.
   const balanceByUid = useMemo(() => {
     const m = new Map<string, number>();
@@ -201,15 +214,42 @@ export default function PosScreen() {
     return m;
   }, [orders]);
 
+  // Optional category filter — toggled by the filter icon in the toolbar
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  // Show only in-stock products toggle
+  const [inStockOnly, setInStockOnly] = useState(false);
+
   const filteredProducts = useMemo(() => {
-    if (debouncedSearch.length < 1) return products.slice(0, 80);
-    return products.filter(
-      (p) =>
-        matchesSearch(p.title, debouncedSearch) ||
-        matchesSearch(p.category ?? "", debouncedSearch) ||
-        matchesSearch(p.subcategory ?? "", debouncedSearch),
-    );
-  }, [products, debouncedSearch]);
+    let list = products;
+    if (categoryFilter !== "all") {
+      list = list.filter((p) => p.category === categoryFilter);
+    }
+    if (inStockOnly) {
+      list = list.filter((p) => (typeof p.stock === "number" ? p.stock : 0) > 0);
+    }
+    if (debouncedSearch.length >= 1) {
+      const q = debouncedSearch.toLowerCase();
+      list = list.filter(
+        (p) =>
+          matchesSearch(p.title, debouncedSearch) ||
+          matchesSearch(p.category ?? "", debouncedSearch) ||
+          matchesSearch(p.subcategory ?? "", debouncedSearch) ||
+          // SKU / barcode (id) — case-insensitive substring match
+          (p.id ?? "").toLowerCase().includes(q),
+      );
+    } else {
+      list = list.slice(0, 80);
+    }
+    return list;
+  }, [products, debouncedSearch, categoryFilter, inStockOnly]);
+
+  const allCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of products) {
+      if (p.category) set.add(p.category);
+    }
+    return Array.from(set).sort();
+  }, [products]);
 
   // ── Cart math (bito-faithful: rows with null/0 qty contribute 0) ──
   const subtotal = useMemo(
@@ -263,16 +303,6 @@ export default function PosScreen() {
         const n = parseInt(raw, 10);
         if (Number.isNaN(n)) return { ...l, qty: null };
         return { ...l, qty: Math.max(0, n) };
-      }),
-    );
-  }, []);
-
-  const incQty = useCallback((productId: string, delta: number) => {
-    setCart((prev) =>
-      prev.map((l) => {
-        if (l.product.id !== productId) return l;
-        const next = (l.qty ?? 0) + delta;
-        return { ...l, qty: next > 0 ? next : 0 };
       }),
     );
   }, []);
@@ -421,16 +451,83 @@ export default function PosScreen() {
         <h1 className="text-xl font-bold text-gray-900">Sotuv</h1>
         <div className="flex-1" />
         <div className="hidden sm:flex items-center gap-1.5">
-          <ToolbarIcon Icon={Filter} title="Filtr" />
-          <ToolbarIcon Icon={ScanLine} title="Skanerlash" />
-          <ToolbarIcon Icon={ScanLine} title="QR" rotated />
-          <ToolbarIcon Icon={ScanLine} title="Barkod" active />
-          <ToolbarIcon Icon={Printer} title="Chop etish" />
-          <ToolbarIcon Icon={ReceiptText} title="Cheklar ro'yxati" />
-          <ToolbarIcon Icon={Undo2} title="Qaytarish" />
+          <ToolbarIcon
+            Icon={Filter}
+            title={showFilter ? "Filtrni yopish" : "Kategoriya filtri"}
+            active={showFilter || categoryFilter !== "all" || inStockOnly}
+            onClick={() => setShowFilter((v) => !v)}
+          />
+          <ToolbarIcon
+            Icon={ScanLine}
+            title="Mahsulot kodi yoki SKU bo'yicha qidirish"
+            onClick={() => productSearchRef.current?.focus()}
+          />
+          <ToolbarIcon
+            Icon={ScanLine}
+            title="QR kod skanerlash"
+            rotated
+            onClick={() => {
+              productSearchRef.current?.focus();
+              toast("QR skaneri keyingi versiyada qoʻshiladi", { icon: "📷" });
+            }}
+          />
+          <ToolbarIcon
+            Icon={ScanLine}
+            title="Barkod (matn bo'yicha qidirish)"
+            active
+            onClick={() => productSearchRef.current?.focus()}
+          />
+          <ToolbarIcon
+            Icon={Printer}
+            title="Joriy chekni chop etish"
+            onClick={() => {
+              if (cart.length === 0) return toast.error("Savat boʻsh");
+              const valid = cart.filter((l) => l.qty && l.qty > 0);
+              if (valid.length === 0) return toast.error("Hech qanday tasdiqlangan miqdor yoʻq");
+              printCartPreview({
+                customerName: customer?.name ?? "Mijoz",
+                customerPhone: customer?.phone ?? "",
+                sellerName,
+                items: valid.map((l) => ({
+                  title: l.product.title,
+                  qty: l.qty as number,
+                  price: Number(l.product.price),
+                })),
+                subtotal,
+                discountAmount,
+                total: netTotal,
+              });
+            }}
+          />
+          <ToolbarIcon
+            Icon={ReceiptText}
+            title="Cheklar / Buyurtmalar ro'yxati"
+            onClick={() => {
+              if (cart.length > 0) {
+                if (!window.confirm("Savatdagi mahsulotlar yoʻqoladi. Davom etamizmi?")) return;
+              }
+              router.push("/admin/orders");
+            }}
+          />
+          <ToolbarIcon
+            Icon={Undo2}
+            title="Qaytarish (refund) — buyurtmalar sahifasida"
+            onClick={() => router.push("/admin/orders")}
+          />
           <div ref={moreMenuRef} className="relative">
             <ToolbarIcon Icon={MoreHorizontal} title="Qo'shimcha" onClick={() => setShowMoreMenu((v) => !v)} />
-            {showMoreMenu && <MoreMenu onClose={() => setShowMoreMenu(false)} />}
+            {showMoreMenu && (
+              <MoreMenu
+                onNavigate={(href) => {
+                  setShowMoreMenu(false);
+                  router.push(href);
+                }}
+                onComing={(label) => {
+                  setShowMoreMenu(false);
+                  toast(`"${label}" — keyingi versiyada qoʻshiladi`, { icon: "🚧" });
+                }}
+              />
+            )}
           </div>
         </div>
         {/* Mobile: button to open right panel */}
@@ -487,6 +584,54 @@ export default function PosScreen() {
             </button>
           </div>
 
+          {/* Filter chip row (toggleable) */}
+          {showFilter && (
+            <div className="px-3 sm:px-5 pb-3 bg-white border-b border-gray-100 shrink-0 space-y-2">
+              <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                <Filter className="size-3.5" />
+                <span>Filtrlar</span>
+                {(categoryFilter !== "all" || inStockOnly) && (
+                  <button
+                    onClick={() => { setCategoryFilter("all"); setInStockOnly(false); }}
+                    className="ml-auto text-[11px] text-red-600 hover:bg-red-50 px-2 py-0.5 rounded"
+                  >
+                    Tozalash
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  onClick={() => setCategoryFilter("all")}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition ${
+                    categoryFilter === "all" ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                >
+                  Barchasi
+                </button>
+                {allCategories.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setCategoryFilter(c)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium transition ${
+                      categoryFilter === c ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    }`}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+              <label className="flex items-center gap-2 text-xs cursor-pointer mt-1">
+                <input
+                  type="checkbox"
+                  checked={inStockOnly}
+                  onChange={(e) => setInStockOnly(e.target.checked)}
+                  className="size-3.5 accent-blue-500 cursor-pointer"
+                />
+                <span className="text-gray-700">Faqat omborda bor mahsulotlar</span>
+              </label>
+            </div>
+          )}
+
           {/* Cart table */}
           <div className="flex-1 overflow-auto px-3 sm:px-5 pb-4">
             {/* Header row */}
@@ -520,7 +665,6 @@ export default function PosScreen() {
                     index={idx + 1}
                     line={line}
                     onSetQty={(raw) => setQty(line.product.id, raw)}
-                    onInc={(d) => incQty(line.product.id, d)}
                     onClone={() => cloneLine(line.product.id)}
                     onRemove={() => removeLine(line.product.id)}
                   />
@@ -546,6 +690,17 @@ export default function PosScreen() {
             onOpenCustomerSheet={() => setCustomerSheetOpen(true)}
             onOpenNewCustomer={() => setShowNewCustomerModal(true)}
             customerSearchRef={customerSearchRef}
+            customerQuery={customerQuery}
+            onCustomerQueryChange={setCustomerQuery}
+            customerSearchResults={customerSearchResults}
+            balanceByUid={balanceByUid}
+            showCustomerDropdown={showCustomerDropdown}
+            setShowCustomerDropdown={setShowCustomerDropdown}
+            onPickInline={(u) => {
+              setCustomer(u);
+              setCustomerQuery("");
+              setShowCustomerDropdown(false);
+            }}
             netTotal={netTotal}
             subtotal={subtotal}
             discountAmount={discountAmount}
@@ -698,14 +853,12 @@ function CartRow({
   index,
   line,
   onSetQty,
-  onInc,
   onClone,
   onRemove,
 }: {
   index: number;
   line: CartLine;
   onSetQty: (raw: string) => void;
-  onInc: (delta: number) => void;
   onClone: () => void;
   onRemove: () => void;
 }) {
@@ -813,6 +966,13 @@ function RightPanel({
   onOpenCustomerSheet,
   onOpenNewCustomer,
   customerSearchRef,
+  customerQuery,
+  onCustomerQueryChange,
+  customerSearchResults,
+  balanceByUid,
+  showCustomerDropdown,
+  setShowCustomerDropdown,
+  onPickInline,
   netTotal,
   subtotal,
   discountAmount,
@@ -833,6 +993,13 @@ function RightPanel({
   onOpenCustomerSheet: () => void;
   onOpenNewCustomer: () => void;
   customerSearchRef: React.RefObject<HTMLInputElement | null>;
+  customerQuery: string;
+  onCustomerQueryChange: (q: string) => void;
+  customerSearchResults: UserData[];
+  balanceByUid: Map<string, number>;
+  showCustomerDropdown: boolean;
+  setShowCustomerDropdown: (v: boolean) => void;
+  onPickInline: (u: UserData) => void;
   netTotal: number;
   subtotal: number;
   discountAmount: number;
@@ -861,8 +1028,8 @@ function RightPanel({
         </button>
       </div>
 
-      {/* Customer search row */}
-      <div className="px-3 sm:px-4 pt-3 sm:pt-4 pb-2 shrink-0">
+      {/* Customer search row — inline search-as-you-type with dropdown */}
+      <div className="px-3 sm:px-4 pt-3 sm:pt-4 pb-2 shrink-0 relative">
         <div className="flex items-center gap-1.5">
           <div className="relative flex-1 min-w-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400 pointer-events-none" />
@@ -870,10 +1037,17 @@ function RightPanel({
               ref={customerSearchRef}
               type="text"
               placeholder="Mijoz ismi yoki telefon raqami"
-              readOnly
-              onClick={onOpenCustomerSheet}
-              onFocus={onOpenCustomerSheet}
-              className="w-full pl-10 pr-16 py-2.5 rounded-xl border border-gray-200 bg-white text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 cursor-pointer"
+              value={customerQuery}
+              onChange={(e) => {
+                onCustomerQueryChange(e.target.value);
+                setShowCustomerDropdown(true);
+              }}
+              onFocus={() => setShowCustomerDropdown(true)}
+              onBlur={() => {
+                // Delay to allow click on dropdown items
+                setTimeout(() => setShowCustomerDropdown(false), 150);
+              }}
+              className="w-full pl-10 pr-16 py-2.5 rounded-xl border border-gray-200 bg-white text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
             />
             <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-gray-500 bg-gray-100 border border-gray-200 rounded-md px-1.5 py-0.5">
               Ctrl+C
@@ -881,7 +1055,7 @@ function RightPanel({
           </div>
           <button
             onClick={onOpenCustomerSheet}
-            title="Mijoz tanlash"
+            title="To'liq ro'yxatdan tanlash"
             className="size-9 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center active:scale-95 transition"
             aria-label="Mijoz tanlash"
           >
@@ -896,6 +1070,49 @@ function RightPanel({
             <UserPlus className="size-4" />
           </button>
         </div>
+
+        {/* Inline dropdown of matching customers */}
+        {showCustomerDropdown && customerQuery.trim().length >= 1 && (
+          <div className="absolute left-3 right-3 sm:left-4 sm:right-4 top-[calc(100%+4px)] bg-white border border-gray-200 rounded-xl shadow-xl z-30 max-h-80 overflow-y-auto">
+            {customerSearchResults.length === 0 ? (
+              <div className="p-4 text-center">
+                <p className="text-sm text-gray-400 mb-2">Mijoz topilmadi</p>
+                <button
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={onOpenNewCustomer}
+                  className="text-xs text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg font-bold"
+                >
+                  + &quot;{customerQuery}&quot; ni yangi mijoz sifatida qoʻshish
+                </button>
+              </div>
+            ) : (
+              customerSearchResults.map((u) => {
+                const bal = balanceByUid.get(u.uid) ?? 0;
+                return (
+                  <button
+                    key={u.uid}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => onPickInline(u)}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 active:bg-gray-100 transition text-left border-b border-gray-100 last:border-b-0"
+                  >
+                    <div className="size-8 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
+                      <User className="size-4 text-blue-500" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{u.name}</p>
+                      <p className="text-[11px] text-gray-500 truncate">{u.phone || "telefon yoʻq"}</p>
+                    </div>
+                    {bal > 0 && (
+                      <span className="text-[11px] font-bold text-red-600 bg-red-50 border border-red-200 rounded-md px-1.5 py-0.5 shrink-0">
+                        {formatNumber(bal)}
+                      </span>
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        )}
       </div>
 
       {/* Customer card — when picked */}
@@ -1159,21 +1376,36 @@ function FooterBar({ sellerName }: { sellerName: string }) {
 // ─────────────────────────────────────────────────────────────
 // Three-dot more menu
 // ─────────────────────────────────────────────────────────────
-function MoreMenu({ onClose }: { onClose: () => void }) {
-  const items = [
-    { icon: Package, label: "Ombor" },
-    { icon: ReceiptText, label: "Onlayn to'lovlar" },
-    { icon: PercentCircle, label: "Narx" },
-    { icon: HandCoins, label: "Pul birligi" },
-    { icon: ArrowLeftRight, label: "Ayirboshlash qiymatlari" },
-    { icon: ReceiptText, label: "Qo'shimcha xarajatlar", highlight: true },
+function MoreMenu({
+  onNavigate,
+  onComing,
+}: {
+  onNavigate: (href: string) => void;
+  onComing: (label: string) => void;
+}) {
+  const items: Array<{
+    icon: React.ComponentType<{ className?: string }>;
+    label: string;
+    href?: string;
+    coming?: boolean;
+    highlight?: boolean;
+  }> = [
+    { icon: Package, label: "Ombor", href: "/admin/ombor" },
+    { icon: ReceiptText, label: "Onlayn to'lovlar", href: "/admin/orders" },
+    { icon: PercentCircle, label: "Narx", coming: true },
+    { icon: HandCoins, label: "Pul birligi", coming: true },
+    { icon: ArrowLeftRight, label: "Ayirboshlash qiymatlari", coming: true },
+    { icon: ReceiptText, label: "Qo'shimcha xarajatlar", highlight: true, coming: true },
   ];
   return (
     <div className="absolute right-0 top-11 w-72 bg-white border border-gray-200 rounded-xl shadow-xl py-1.5 z-50">
       {items.map((it) => (
         <button
           key={it.label}
-          onClick={() => onClose()}
+          onClick={() => {
+            if (it.href) onNavigate(it.href);
+            else if (it.coming) onComing(it.label);
+          }}
           className={`w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-gray-50 transition ${
             it.highlight ? "bg-blue-50 text-blue-700" : "text-gray-700"
           }`}
@@ -1186,6 +1418,75 @@ function MoreMenu({ onClose }: { onClose: () => void }) {
       ))}
     </div>
   );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Print receipt (opens new tab with formatted HTML, triggers print)
+// ─────────────────────────────────────────────────────────────
+function printCartPreview(opts: {
+  customerName: string;
+  customerPhone: string;
+  sellerName: string;
+  items: Array<{ title: string; qty: number; price: number }>;
+  subtotal: number;
+  discountAmount: number;
+  total: number;
+}) {
+  const now = new Date();
+  const dateStr = now.toLocaleString("uz-UZ");
+  const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(n).replace(/,/g, " ");
+  const rows = opts.items
+    .map(
+      (i, idx) => `
+        <tr>
+          <td style="text-align:center">${idx + 1}</td>
+          <td>${i.title.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c] || c)}</td>
+          <td style="text-align:center">${i.qty}</td>
+          <td style="text-align:right">${fmt(i.price)}</td>
+          <td style="text-align:right;font-weight:bold">${fmt(i.qty * i.price)}</td>
+        </tr>`,
+    )
+    .join("");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Chek — MegaHome</title>
+    <style>
+      body{font-family:'Segoe UI',Tahoma,sans-serif;font-size:13px;color:#1a1a1a;margin:14px;}
+      h1{margin:0 0 4px;font-size:18px;}
+      .meta{color:#555;font-size:11px;margin-bottom:8px;border-bottom:1px solid #ddd;padding-bottom:6px;}
+      table{width:100%;border-collapse:collapse;margin-top:8px;font-size:12px;}
+      th{background:#f5f5f5;text-align:left;padding:6px 8px;border-bottom:2px solid #ddd;}
+      td{padding:5px 8px;border-bottom:1px solid #eee;}
+      .totals{margin-top:10px;padding-top:8px;border-top:2px solid #333;}
+      .totals .row{display:flex;justify-content:space-between;padding:2px 0;}
+      .totals .grand{font-size:16px;font-weight:bold;margin-top:4px;}
+      .footer{margin-top:14px;text-align:center;color:#888;font-size:11px;}
+      @media print{body{margin:8px;}}
+    </style></head><body>
+    <h1>MEGAHOME ULGURJI</h1>
+    <div class="meta">
+      <strong>Chek (oldin ko'rish)</strong> · Sana: ${dateStr}<br>
+      Mijoz: <strong>${opts.customerName}</strong>${opts.customerPhone ? ` · ${opts.customerPhone}` : ""}<br>
+      Sotuvchi: ${opts.sellerName}
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>Mahsulot</th><th>Soni</th><th style="text-align:right">Narx</th><th style="text-align:right">Jami</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="totals">
+      <div class="row"><span>Oraliq summa:</span><span>${fmt(opts.subtotal)} so'm</span></div>
+      ${opts.discountAmount > 0 ? `<div class="row" style="color:#c2410c"><span>Chegirma:</span><span>−${fmt(opts.discountAmount)} so'm</span></div>` : ""}
+      <div class="row grand"><span>JAMI:</span><span>${fmt(opts.total)} so'm</span></div>
+    </div>
+    <div class="footer">Rahmat! · MegaHome Ulgurji</div>
+    <script>window.onload=function(){setTimeout(function(){window.print();},250);};</script>
+    </body></html>`;
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const w = window.open(url, "_blank");
+  if (!w) {
+    URL.revokeObjectURL(url);
+    return;
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1609,5 +1910,3 @@ function PosSuccess({
   );
 }
 
-// reference (silences unused import warning until cart imports lucide)
-void ShoppingCart;
