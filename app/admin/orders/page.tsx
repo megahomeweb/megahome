@@ -13,6 +13,7 @@ import { IoIosArrowDown } from 'react-icons/io';
 import Image from 'next/image';
 import { formatUZS } from '@/lib/formatPrice';
 import { formatDateTimeShort } from "@/lib/formatDate";
+import { matchesSearch } from '@/lib/searchMatch';
 import { ORDER_STATUSES, getStatusInfo } from '@/lib/orderStatus';
 import { OrderStatus } from '@/lib/types';
 import toast from 'react-hot-toast';
@@ -133,9 +134,9 @@ const Orders = () => {
         ) : (() => {
           const filteredOrders = search.trim()
             ? orders.filter(o =>
-                o.clientName?.toLowerCase().includes(search.toLowerCase()) ||
-                o.clientPhone?.includes(search) ||
-                o.id?.toLowerCase().includes(search.toLowerCase())
+                (o.clientName ? matchesSearch(o.clientName, search) : false) ||
+                (o.clientPhone ? o.clientPhone.includes(search) : false) ||
+                (o.id ? o.id.toLowerCase().includes(search.toLowerCase()) : false)
               )
             : orders;
           return filteredOrders.length > 0 ? filteredOrders.map((order, idx) => (

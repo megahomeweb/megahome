@@ -11,7 +11,9 @@ import { updateDoc, doc } from 'firebase/firestore';
 import { fireDB, auth } from '@/firebase/config';
 import { useNotificationStore } from '@/store/useNotificationStore';
 import { formatUZS } from '@/lib/formatPrice';
+import { matchesSearch } from '@/lib/searchMatch';
 import Link from 'next/link';
+import Pagination, { usePagination } from './Pagination';
 
 const roleOptions = ["admin", "manager", "user"];
 const roleLabels: Record<string, string> = {
@@ -75,11 +77,10 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
       filtered = filtered.filter((u: UserData) => u.role === roleFilter);
     }
     if (search.length >= 2) {
-      const q = search.toLowerCase();
       filtered = filtered.filter((u: UserData) =>
-        u.name.toLowerCase().includes(q) ||
-        (u.email && u.email.toLowerCase().includes(q)) ||
-        (u.phone && u.phone.includes(q))
+        matchesSearch(u.name, search) ||
+        (u.email ? matchesSearch(u.email, search) : false) ||
+        (u.phone ? u.phone.includes(search) : false)
       );
     }
     const admins = filtered.filter((u: UserData) => u.role === 'admin');
@@ -92,6 +93,8 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
       });
     return [...admins, ...managers, ...others];
   }, [users, search, roleFilter]);
+
+  const { page, perPage, setPage, setPerPage, pageItems, total } = usePagination(filteredUsers, 25);
 
   const handleDelete = async (user: UserData) => {
     setLoadingUserId(user.uid);
@@ -147,13 +150,13 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
             </tr>
           </thead>
           <tbody>
-            {filteredUsers.length === 0 ? (
+            {total === 0 ? (
               <tr>
                 <td colSpan={6} className="h-20 px-4 py-2 text-center text-gray-400 text-sm">
                   {search.length >= 2 ? "Foydalanuvchi topilmadi" : "Foydalanuvchilar mavjud emas"}
                 </td>
               </tr>
-            ) : (filteredUsers.map((user: UserData) => {
+            ) : (pageItems.map((user: UserData) => {
               const isNew = isNewUser(user.uid);
               const stats = userStats[user.uid];
               return (
@@ -240,11 +243,11 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
 
       {/* Mobile cards */}
       <div className="md:hidden space-y-3">
-        {filteredUsers.length === 0 ? (
+        {total === 0 ? (
           <div className="bg-white rounded-xl border border-gray-200 p-4 text-center text-gray-400 text-sm">
             {search.length >= 2 ? "Foydalanuvchi topilmadi" : "Foydalanuvchilar mavjud emas"}
           </div>
-        ) : (filteredUsers.map((user: UserData) => {
+        ) : (pageItems.map((user: UserData) => {
           const isNew = isNewUser(user.uid);
           const stats = userStats[user.uid];
           return (
@@ -324,6 +327,15 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
           );
         }))}
       </div>
+
+      {/* Pagination */}
+      <Pagination
+        total={total}
+        page={page}
+        perPage={perPage}
+        onPageChange={setPage}
+        onPerPageChange={setPerPage}
+      />
     </div>
   );
 };

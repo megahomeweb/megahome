@@ -1,10 +1,13 @@
 "use client";
 import React, { useEffect, useMemo, useState } from 'react';
 import PanelTitle from '@/components/admin/PanelTitle';
+import Search from '@/components/admin/Search';
+import Pagination, { usePagination } from '@/components/admin/Pagination';
 import { useOrderStore } from '@/store/useOrderStore';
 import { useAuthStore } from '@/store/authStore';
 import type { UserData } from '@/store/authStore';
 import { formatUZS } from '@/lib/formatPrice';
+import { matchesSearch } from '@/lib/searchMatch';
 import { Crown, TrendingUp, ShoppingCart, Phone, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { exportCustomersToExcel } from '@/lib/importExcel';
@@ -69,6 +72,7 @@ const CustomersPage = () => {
   }, [orders, users]);
 
   const [activityFilter, setActivityFilter] = useState<string>('all');
+  const [search, setSearch] = useState<string>('');
 
   const customerActivity = useMemo(() => {
     const now = Date.now();
@@ -91,13 +95,24 @@ const CustomersPage = () => {
   }, [orders]);
 
   const filteredCustomers = useMemo(() => {
-    if (activityFilter === 'all') return customerStats;
-    return customerStats.filter((c) => {
-      const key = c.user?.uid || c.phone;
-      const activity = customerActivity(key);
-      return activity.status === activityFilter;
-    });
-  }, [customerStats, activityFilter, customerActivity]);
+    let list = customerStats;
+    if (activityFilter !== 'all') {
+      list = list.filter((c) => {
+        const key = c.user?.uid || c.phone;
+        const activity = customerActivity(key);
+        return activity.status === activityFilter;
+      });
+    }
+    if (search.length >= 2) {
+      list = list.filter((c) =>
+        matchesSearch(c.name, search) ||
+        (c.phone ? c.phone.includes(search) : false)
+      );
+    }
+    return list;
+  }, [customerStats, activityFilter, customerActivity, search]);
+
+  const { page, perPage, setPage, setPerPage, pageItems, total } = usePagination(filteredCustomers, 25);
 
   if (loadingOrders) {
     return (
@@ -125,9 +140,12 @@ const CustomersPage = () => {
         </div>
       )}
 
+      {/* Search */}
+      <Search search={search} handleSearchChange={setSearch} placeholder="Mijoz ismi yoki telefon..." />
+
       {/* Activity filter tabs */}
-      <div className="px-4 pb-3">
-        <div className="flex gap-2">
+      <div className="px-4 pb-3 overflow-x-auto -mb-px">
+        <div className="flex gap-2 min-w-max">
           {[
             { key: 'all', label: 'Barchasi' },
             { key: 'active', label: 'Faol' },
@@ -136,7 +154,7 @@ const CustomersPage = () => {
             { key: 'inactive', label: 'Faolsiz' },
           ].map((f) => (
             <button key={f.key} onClick={() => setActivityFilter(f.key)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors shrink-0 ${
                 activityFilter === f.key ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}>
               {f.label}
@@ -146,13 +164,16 @@ const CustomersPage = () => {
       </div>
 
       <div className="px-4 py-3">
-        {filteredCustomers.length === 0 ? (
-          <p className="text-gray-500 text-center py-10">Mijozlar mavjud emas</p>
+        {total === 0 ? (
+          <p className="text-gray-500 text-center py-10">
+            {search.length >= 2 ? 'Mijoz topilmadi' : 'Mijozlar mavjud emas'}
+          </p>
         ) : (
           <div className="space-y-3">
-            {filteredCustomers.map((customer, idx) => {
+            {pageItems.map((customer, localIdx) => {
+              const idx = (page - 1) * perPage + localIdx;
               const rank = idx + 1;
-              const isTop3 = activityFilter === 'all' && rank <= 3;
+              const isTop3 = activityFilter === 'all' && search.length < 2 && rank <= 3;
               const crownColor = rank === 1 ? 'text-yellow-500' : rank === 2 ? 'text-gray-400' : 'text-amber-700';
               const customerKey = customer.user?.uid || customer.phone;
               const activity = customerActivity(customerKey);
@@ -208,6 +229,16 @@ const CustomersPage = () => {
               );
             })}
           </div>
+        )}
+
+        {total > 0 && (
+          <Pagination
+            total={total}
+            page={page}
+            perPage={perPage}
+            onPageChange={setPage}
+            onPerPageChange={setPerPage}
+          />
         )}
       </div>
     </div>

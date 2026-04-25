@@ -13,6 +13,7 @@ import { ProductTableSkeleton, ProductCardListSkeleton } from './skeletons/ListS
 import { fireStorage } from '@/firebase/config';
 import { deleteObject, listAll, ref } from 'firebase/storage';
 import toast from 'react-hot-toast';
+import Pagination, { usePagination } from './Pagination';
 
 interface ProductTableProps {
   search: string;
@@ -50,16 +51,20 @@ const ProductTable = ({ search, category = 'all', subcategory = 'all', selectedI
     return filtered;
   }, [products, search, category, subcategory]);
 
-  const allVisibleSelected = filteredProducts.length > 0 && filteredProducts.every((p) => selectedIds.has(p.id));
+  // Pagination — operates on the filtered list
+  const { page, perPage, setPage, setPerPage, pageItems, total } = usePagination(filteredProducts, 25);
+
+  // Selection helpers operate on what's *visible on this page*
+  const allVisibleSelected = pageItems.length > 0 && pageItems.every((p) => selectedIds.has(p.id));
 
   const handleToggleAll = () => {
     if (allVisibleSelected) {
       const next = new Set(selectedIds);
-      for (const p of filteredProducts) next.delete(p.id);
+      for (const p of pageItems) next.delete(p.id);
       onSelectionChange(next);
     } else {
       const next = new Set(selectedIds);
-      for (const p of filteredProducts) next.add(p.id);
+      for (const p of pageItems) next.add(p.id);
       onSelectionChange(next);
     }
   };
@@ -125,19 +130,19 @@ const ProductTable = ({ search, category = 'all', subcategory = 'all', selectedI
           <tbody>
             {loading && products.length === 0 ? (
               <ProductTableSkeleton rows={6} />
-            ) : filteredProducts.length === 0 ? (
+            ) : total === 0 ? (
               <tr>
                 <td colSpan={11} className="h-20 px-4 py-2 text-center text-gray-500">
                   {search.length >= 2 ? "Mahsulotlar topilmadi" : "Mahsulotlar mavjud emas"}
                 </td>
               </tr>
-            ) : (filteredProducts.map((product, index) => (
-              <tr key={index} className={`border-t border-gray-200 ${selectedIds.has(product.id) ? 'bg-blue-50/50' : ''}`}>
+            ) : (pageItems.map((product, index) => (
+              <tr key={product.id} className={`border-t border-gray-200 ${selectedIds.has(product.id) ? 'bg-blue-50/50' : ''}`}>
                 <td className="h-20 px-4 py-2 text-center">
                   <input type="checkbox" checked={selectedIds.has(product.id)} onChange={() => handleToggleOne(product.id)} className="size-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900 cursor-pointer" />
                 </td>
                 <td className="h-20 px-4 py-2 text-black text-sm font-normal text-center">
-                  {index + 1}
+                  {(page - 1) * perPage + index + 1}
                 </td>
                 <td className="h-20 px-4 py-2 text-black text-sm font-normal">
                   {product.title}
@@ -230,17 +235,17 @@ const ProductTable = ({ search, category = 'all', subcategory = 'all', selectedI
       <div className="custom:hidden space-y-4">
         {loading && products.length === 0 ? (
           <ProductCardListSkeleton rows={5} />
-        ) : filteredProducts.length === 0 ? (
+        ) : total === 0 ? (
           <div className="bg-white rounded-xl border border-gray-200 p-4 text-center text-gray-500">
             {search.length >= 2 ? "Mahsulotlar topilmadi" : "Mahsulotlar mavjud emas"}
           </div>
-        ) : (filteredProducts.map((product, index) => (
-          <div key={index} className={`bg-white rounded-xl border border-gray-200 p-4 ${selectedIds.has(product.id) ? 'ring-2 ring-blue-500/30 bg-blue-50/30' : ''}`}>
+        ) : (pageItems.map((product, index) => (
+          <div key={product.id} className={`bg-white rounded-xl border border-gray-200 p-4 ${selectedIds.has(product.id) ? 'ring-2 ring-blue-500/30 bg-blue-50/30' : ''}`}>
             <div className="flex justify-between items-center mb-3">
               <h3 className="font-medium text-black flex items-center gap-2">
                 <input type="checkbox" checked={selectedIds.has(product.id)} onChange={() => handleToggleOne(product.id)} className="size-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900 cursor-pointer" />
                 <span className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-gray-100 text-xs font-medium text-black">
-                  {index + 1}
+                  {(page - 1) * perPage + index + 1}
                 </span>
                 {product.title}
               </h3>
@@ -323,6 +328,15 @@ const ProductTable = ({ search, category = 'all', subcategory = 'all', selectedI
           </div>
         )))}
       </div>
+
+      {/* Pagination — same component for desktop & mobile */}
+      <Pagination
+        total={total}
+        page={page}
+        perPage={perPage}
+        onPageChange={setPage}
+        onPerPageChange={setPerPage}
+      />
     </div>
   )
 }
