@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import React from 'react'
 import { BiUser } from 'react-icons/bi'
-import { LayoutDashboard, ShoppingCart, PackagePlus, BarChart3, Crown, FileText, Warehouse, MessageCircle, Receipt } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, PackagePlus, BarChart3, Crown, FileText, Warehouse, MessageCircle, Receipt, Tag } from 'lucide-react';
 import { useNotificationStore } from '@/store/useNotificationStore'
 import { useAuthStore } from '@/store/authStore'
 
@@ -85,6 +85,12 @@ const Menu = () => {
       <Link href={'/admin/invoices'} className={`flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-link-hover ${isActive('/admin/invoices') ? 'bg-brand-gray-100' : ''}`}>
         <FileText size={24} />
         <p className="text-black text-sm font-medium leading-normal">Schyot-faktura</p>
+      </Link>
+
+      {/* All staff: Label maker */}
+      <Link href={'/admin/label'} className={`flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-link-hover ${isActive('/admin/label') ? 'bg-brand-gray-100' : ''}`}>
+        <Tag size={24} />
+        <p className="text-black text-sm font-medium leading-normal">Etiketkalar</p>
       </Link>
 
       {/* All staff: Kirim */}
