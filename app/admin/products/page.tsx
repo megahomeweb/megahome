@@ -121,10 +121,14 @@ const Products = () => {
   }) => {
     const selectedCategory = categories.find((cat) => cat.name === activeCategory);
 
-    // Compute memoized values before any early returns to satisfy hooks rules
+    // Compute memoized values before any early returns to satisfy hooks rules.
+    // Deps include `products` — without it, the subcategory counts froze at
+    // the moment the user first opened a category and never reflected new
+    // imports, deletes, or category moves. `products` is captured from the
+    // parent closure but the linter can't see that, so it's silently stale.
     const productsInCategory = useMemo(() => (
       products.filter((p) => p.category === activeCategory)
-    ), [activeCategory]);
+    ), [activeCategory, products]);
 
     const allInCategoryCount = productsInCategory.length;
 

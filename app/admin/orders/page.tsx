@@ -46,6 +46,21 @@ const Orders = () => {
 
   const newOrderCount = useMemo(() => orders.filter(o => o.status === 'yangi' || !o.status).length, [orders]);
 
+  // Single source of truth for "what the operator currently sees". The Excel
+  // export was previously dumping the entire `orders` collection regardless
+  // of the active search — when an admin filtered to one customer to send
+  // them their order history, the resulting download still contained every
+  // order in the system. Now both the list and the export consume this.
+  const filteredOrders = useMemo(() => {
+    if (!search.trim()) return orders;
+    const q = search.toLowerCase();
+    return orders.filter(o =>
+      (o.clientName ? matchesSearch(o.clientName, search) : false) ||
+      (o.clientPhone ? o.clientPhone.includes(search) : false) ||
+      (o.id ? o.id.toLowerCase().includes(q) : false)
+    );
+  }, [orders, search]);
+
   const handleConfirmAllNew = async () => {
     const newOrders = orders.filter(o => o.status === 'yangi' || !o.status);
     if (newOrders.length === 0) return;
@@ -122,7 +137,17 @@ const Orders = () => {
         <Button
           variant="outline"
           className="rounded-xl cursor-pointer text-sm h-10 gap-1.5 px-3 sm:px-4"
-          onClick={() => exportOrdersToExcel(orders, 'buyurtmalar')}
+          onClick={() => {
+            if (filteredOrders.length === 0) {
+              toast.error("Eksport qilinadigan buyurtma yo'q");
+              return;
+            }
+            const fileName = search.trim()
+              ? `buyurtmalar_qidiruv_${search.trim().slice(0, 20)}`
+              : 'buyurtmalar';
+            exportOrdersToExcel(filteredOrders, fileName);
+            toast.success(`${filteredOrders.length} ta buyurtma eksport qilindi`);
+          }}
         >
           <Download className="size-4" /> Excel
         </Button>
@@ -132,13 +157,6 @@ const Orders = () => {
             <OrderListSkeleton rows={6} />
           </div>
         ) : (() => {
-          const filteredOrders = search.trim()
-            ? orders.filter(o =>
-                (o.clientName ? matchesSearch(o.clientName, search) : false) ||
-                (o.clientPhone ? o.clientPhone.includes(search) : false) ||
-                (o.id ? o.id.toLowerCase().includes(search.toLowerCase()) : false)
-              )
-            : orders;
           return filteredOrders.length > 0 ? filteredOrders.map((order, idx) => (
           <Disclosure key={order.id}>
             {({ open }) => (

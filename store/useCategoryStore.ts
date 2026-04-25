@@ -1,6 +1,6 @@
 import { fireDB } from '@/firebase/config';
 import { CategoryI } from '@/lib/types';
-import { addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, query, setDoc } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, query, updateDoc } from 'firebase/firestore';
 import {create} from 'zustand';
 
 interface CategoryStoreI {
@@ -65,11 +65,16 @@ const useCategoryStore = create<CategoryStoreI>((set, get) => ({
     }
   },
 
-  // Update a category
+  // Update a category. updateDoc instead of setDoc — setDoc REPLACES the
+  // whole document, which silently wipes any field the form doesn't know
+  // about (createdAt, displayOrder, custom flags added by future features).
+  // updateDoc merges, preserving unknown fields. Strip `id` so we don't
+  // persist a redundant copy in the doc body.
   updateCategory: async (id: string, updatedCategory: CategoryI) => {
     set({ loading: true });
     try {
-      await setDoc(doc(fireDB, 'categories', id), updatedCategory);
+      const { id: _id, ...data } = updatedCategory;
+      await updateDoc(doc(fireDB, 'categories', id), data);
       set({ category: updatedCategory, loading: false });
     } catch (error) {
       console.error('Error updating category:', error);

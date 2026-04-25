@@ -97,6 +97,13 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
   const { page, perPage, setPage, setPerPage, pageItems, total } = usePagination(filteredUsers, 25);
 
   const handleDelete = async (user: UserData) => {
+    // Hard-delete is irreversible: removes Firebase Auth account + Firestore
+    // user doc (and may break referential integrity in orders/nasiya). Without
+    // a confirm prompt, a stray click on the trash icon vaporizes a customer
+    // and all their identity data.
+    if (!window.confirm(
+      `${user.name} ni o'chirmoqchimisiz?\n\nBu amalni qaytarib bo'lmaydi. Foydalanuvchining akkaunti, kirish huquqi va profil ma'lumotlari butunlay o'chiriladi.`
+    )) return;
     setLoadingUserId(user.uid);
     try {
       const idToken = await auth.currentUser?.getIdToken();
@@ -121,6 +128,22 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
   };
 
   const handleRoleChange = async (user: UserData, newRole: string) => {
+    if (newRole === user.role) return;
+    // Confirm any role change — promoting to admin grants full panel access
+    // (delete users, drop products, see profit margins, change prices). The
+    // dropdown is only one tap away from disaster, so make the operator
+    // explicitly acknowledge what they're doing.
+    const isElevation =
+      (user.role === 'user' && (newRole === 'admin' || newRole === 'manager')) ||
+      (user.role === 'manager' && newRole === 'admin');
+    const isDemotion = user.role === 'admin' && newRole !== 'admin';
+    let message = `${user.name} ning rolini ${roleLabels[user.role] || user.role} → ${roleLabels[newRole]} ga o'zgartirmoqchimisiz?`;
+    if (isElevation && newRole === 'admin') {
+      message += "\n\n⚠️ Admin barcha mahsulot, buyurtma va foydalanuvchilarni boshqarishi mumkin.";
+    } else if (isDemotion) {
+      message += "\n\n⚠️ Admin huquqlari olib tashlanadi. Foydalanuvchi endi admin panelga kira olmaydi.";
+    }
+    if (!window.confirm(message)) return;
     setLoadingUserId(user.uid);
     try {
       const userDoc = doc(fireDB, 'user', user.uid);

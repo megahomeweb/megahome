@@ -18,10 +18,19 @@ const DashboardSummary = () => {
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
   useEffect(() => { fetchAllOrders(); }, [fetchAllOrders]);
 
+  // "Yangi" counts pulled from the orders/users themselves — single source
+  // of truth. Previously this widget counted UNREAD NOTIFICATIONS
+  // (`type==='new_order'`), which silently disagreed with QuickActionsWidget
+  // (which counts orders with `status==='yangi'`) — two different "new"
+  // numbers on the same page. We now match QuickActionsWidget so both
+  // widgets show the same value.
   const unreadOrders = useMemo(
-    () => notifications.filter((n) => !n.read && n.type === "new_order"),
-    [notifications]
+    () => orders.filter((o) => o.status === 'yangi' || !o.status),
+    [orders]
   );
+  // New-user count = users whose `time` is within last 24h. Falls back to
+  // the notifications-based count if `users` aren't loaded here (this
+  // component doesn't fetch the user collection itself).
   const unreadUsers = useMemo(
     () => notifications.filter((n) => !n.read && n.type === "new_user"),
     [notifications]
@@ -85,7 +94,7 @@ const DashboardSummary = () => {
       </Link>
 
       {/* New Users */}
-      <Link href="/admin">
+      <Link href="/admin/users">
         <ShineBorder
           color={unreadUsers.length > 0 ? ["#3b82f6", "#2563eb", "#60a5fa"] : ["#e5e7eb"]}
           borderWidth={unreadUsers.length > 0 ? 2 : 1}

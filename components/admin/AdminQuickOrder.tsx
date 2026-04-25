@@ -68,11 +68,17 @@ export default function AdminQuickOrder() {
     return () => clearTimeout(timer);
   }, [productSearch]);
 
-  // Filter non-admin users by name or phone (Cyrillic ↔ Latin tolerant)
+  // Filter to actual CUSTOMERS only (Cyrillic ↔ Latin tolerant).
+  // Previously filtered `role !== "admin"`, which leaked managers (internal
+  // staff) into the customer picker — the admin would accidentally place a
+  // "customer order" against a fellow staff member's UID, polluting their
+  // order history and skewing customer-rank reports. Now require `role ===
+  // "user"` (or missing/empty role for legacy accounts created before the
+  // role field existed).
   const filteredUsers = useMemo(() => {
-    const nonAdmins = users.filter((u) => u.role !== "admin");
-    if (customerSearch.length < 2) return nonAdmins;
-    return nonAdmins.filter(
+    const customers = users.filter((u) => !u.role || u.role === "user");
+    if (customerSearch.length < 2) return customers;
+    return customers.filter(
       (u) =>
         matchesSearch(u.name, customerSearch) ||
         (u.phone && u.phone.includes(customerSearch))

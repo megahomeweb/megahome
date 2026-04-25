@@ -133,9 +133,20 @@ const CustomersPage = () => {
           <Button
             variant="outline"
             className="rounded-xl cursor-pointer text-xs h-8 gap-1"
-            onClick={() => exportCustomersToExcel(customerStats)}
+            onClick={() => {
+              // Export what the operator is actually looking at — when they've
+              // filtered to "Xavfli" customers to run a re-engagement
+              // campaign, dumping every customer in the system defeats the
+              // entire workflow. `filteredCustomers` honours both the
+              // activity-tier filter and the name/phone search.
+              if (filteredCustomers.length === 0) return;
+              exportCustomersToExcel(filteredCustomers);
+            }}
           >
-            <Download className="size-3.5" /> Mijozlarni Excel yuklab olish
+            <Download className="size-3.5" />
+            {activityFilter !== 'all' || search.length >= 2
+              ? `${filteredCustomers.length} ta filtrlangan mijozni yuklab olish`
+              : 'Mijozlarni Excel yuklab olish'}
           </Button>
         </div>
       )}

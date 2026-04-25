@@ -104,20 +104,37 @@ const useProductStore = create<ProductStore>((set, get) => ({
     }
   },
 
-  // Bulk update prices by percentage for given product IDs
+  // Bulk update prices by percentage for given product IDs.
+  // Price is stored as a string (e.g. "5000") but Excel imports and manual
+  // entries sometimes contain locale separators ("5,000", "5 000", "5.000")
+  // or stray currency text ("5000 so'm"). Plain Number("5,000") returns NaN
+  // and Math.round(NaN) returns NaN — Firestore then silently writes
+  // `price: "NaN"`, breaking display, sort, and totals across the catalog.
+  // Strip everything but digits before parsing, and skip the row if the
+  // result is non-positive (don't blow away a valid price with 0).
   bulkUpdatePrices: async (productIds: string[], percentChange: number, updateCost: boolean) => {
     const batch = writeBatch(fireDB);
     const multiplier = 1 + (percentChange / 100);
     let updated = 0;
 
+    const parsePrice = (raw: unknown): number => {
+      if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+      if (typeof raw !== 'string') return NaN;
+      const digits = raw.replace(/[^\d]/g, '');
+      return digits ? Number(digits) : NaN;
+    };
+
     for (const pid of productIds) {
       const product = get().products.find((p) => p.id === pid);
       if (!product) continue;
 
-      const newPrice = Math.max(0, Math.round(Number(product.price) * multiplier));
+      const currentPrice = parsePrice(product.price);
+      if (!Number.isFinite(currentPrice) || currentPrice <= 0) continue;
+
+      const newPrice = Math.max(0, Math.round(currentPrice * multiplier));
       const updates: { price: string; costPrice?: number } = { price: String(newPrice) };
 
-      if (updateCost && product.costPrice) {
+      if (updateCost && product.costPrice && Number.isFinite(product.costPrice)) {
         updates.costPrice = Math.round(product.costPrice * multiplier);
       }
 
