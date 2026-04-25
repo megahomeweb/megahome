@@ -87,6 +87,13 @@ export const useOrderStore = create<StoreState>((set, get) => ({
       if (input.totalPriceHint && Number.isFinite(input.totalPriceHint)) {
         headers['X-Client-Total-Hint'] = String(input.totalPriceHint);
       }
+      // Per-call idempotency key — prevents double-create if a flaky
+      // network retries the POST. Server uses Admin SDK create() to
+      // atomically claim the key; second attempt returns { dedup: true }.
+      headers['Idempotency-Key'] =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `idem-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
       const res = await fetch('/api/orders/create', {
         method: 'POST',

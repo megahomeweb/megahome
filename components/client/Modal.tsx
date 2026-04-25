@@ -111,20 +111,17 @@ const SubmitModal = ({ setOpen }: props) => {
         toast(`Narxlar yangilandi. Jami: ${formatUZS(result.totalPrice)}`);
       }
 
-      // Fire-and-forget: email + Telegram notifications
+      // Fire-and-forget: email + Telegram notifications.
+      // We send only orderId — server reads real order data from Firestore
+      // and verifies the caller owns it (or is staff). Closes the previous
+      // spam-relay vulnerability where a malicious user could POST any
+      // body and the server would email it as-is.
       const idToken = await auth.currentUser?.getIdToken();
       if (idToken) {
         fetch('/api/sendOrderEmail', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-          body: JSON.stringify({
-            clientName: data.firstName,
-            clientPhone: data.phoneNumber,
-            basketItems: result.basketItems,
-            totalPrice: result.totalPrice,
-            totalQuantity: result.totalQuantity,
-            date: { seconds: Math.floor(Date.now() / 1000) },
-          }),
+          body: JSON.stringify({ orderId: result.orderId }),
         }).catch(() => {});
       }
       telegramNotify('order_placed', {

@@ -14,6 +14,15 @@ service cloud.firestore {
         get(/databases/$(database)/documents/user/$(request.auth.uid)).data.role == 'admin';
     }
 
+    // Helper: Check if user is staff (admin OR manager) — staff have
+    // legitimate cross-customer read access on the user collection.
+    function isStaff() {
+      return isAuth() && (
+        get(/databases/$(database)/documents/user/$(request.auth.uid)).data.role == 'admin' ||
+        get(/databases/$(database)/documents/user/$(request.auth.uid)).data.role == 'manager'
+      );
+    }
+
     // Helper: Check if user owns the document
     function isOwner(uid) {
       return isAuth() && request.auth.uid == uid;
@@ -24,8 +33,11 @@ service cloud.firestore {
     // - Admins can create customer profiles from POS / admin panel
     //   (POS-created customers have no Firebase Auth user; admin writes
     //   the doc with `role: "user"` and `createdViaPos: true`)
+    // - READ access: previously `allow read: if isAuth()` — any logged-in
+    //   customer could enumerate every other customer's phone/email (PII
+    //   leak). Now restricted to OWNER or STAFF (admin/manager).
     match /user/{userId} {
-      allow read: if isAuth();
+      allow read: if isOwner(userId) || isStaff();
       allow create: if isOwner(userId)
         || (isAdmin() && request.resource.data.role == 'user');
       allow update: if isOwner(userId) || isAdmin();
@@ -86,6 +98,12 @@ service cloud.firestore {
     // Telegram webhook idempotency dedup — pure server-side via Admin SDK.
     // No client should ever read/write this collection.
     match /processedUpdates/{updateId} {
+      allow read, write: if false;
+    }
+
+    // Order/POS idempotency keys — server-only via Admin SDK. Prevents
+    // double-create on retry.
+    match /idempotencyKeys/{key} {
       allow read, write: if false;
     }
 

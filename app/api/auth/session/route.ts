@@ -1,13 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminApp } from '@/lib/firebase-admin';
 
-const SESSION_SECRET = process.env.SESSION_SECRET || process.env.FIREBASE_PROJECT_ID || 'mega-ulgurji-session-key';
+/**
+ * Resolve the HMAC signing secret. Previous code fell back to
+ * FIREBASE_PROJECT_ID (public!) and then to a hardcoded literal — both let
+ * an attacker forge admin session cookies. Now: SESSION_SECRET is required;
+ * we throw at request time so missing-env shows up as 500 in monitoring
+ * instead of being silently masked by a forgeable secret.
+ */
+function getSessionSecret(): string {
+  const s = process.env.SESSION_SECRET;
+  if (!s || s.length < 16) {
+    throw new Error('SESSION_SECRET env var is required and must be at least 16 chars');
+  }
+  return s;
+}
 
 async function signPayload(payload: string): Promise<string> {
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     'raw',
-    encoder.encode(SESSION_SECRET),
+    encoder.encode(getSessionSecret()),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign']

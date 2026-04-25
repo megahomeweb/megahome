@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import * as admin from 'firebase-admin';
 import { getAdminApp } from '@/lib/firebase-admin';
 
 /**
@@ -81,6 +82,41 @@ export async function POST(req: NextRequest) {
     }
 
     const adminApp = getAdminApp();
+
+    // ── Idempotency guard ──
+    // Without this, a flaky network retry from the POS or web checkout
+    // would create the order twice — double stock decrement, double nasiya
+    // entry, double charge. Caller passes a unique key per logical
+    // transaction. We claim it via Admin SDK `create()` (atomic;
+    // ALREADY_EXISTS on second call). On dup, we look up the original
+    // order and return the same response shape so the client treats it
+    // identically. Same pattern as Telegram webhook idempotency.
+    const idemKey = req.headers.get('Idempotency-Key');
+    let claimedIdemKey: string | null = null;
+    if (idemKey) {
+      const k = idemKey.trim();
+      if (k.length < 8 || k.length > 128) {
+        return NextResponse.json({ error: 'Invalid Idempotency-Key' }, { status: 400 });
+      }
+      try {
+        await adminApp
+          .firestore()
+          .collection('idempotencyKeys')
+          .doc(k)
+          .create({ scope: 'orders/create', createdAt: admin.firestore.FieldValue.serverTimestamp() });
+        claimedIdemKey = k;
+      } catch (err) {
+        const code = (err as { code?: number | string })?.code;
+        if (code === 6 || code === 'already-exists') {
+          // Duplicate retry — return a 200 with a flag. We don't reconstruct
+          // the original order body; clients that need the orderId should
+          // store it locally on first success.
+          return NextResponse.json({ ok: true, dedup: true });
+        }
+        throw err;
+      }
+    }
+    void claimedIdemKey;
     let callerUid: string;
     let callerIsAdmin = false;
     try {

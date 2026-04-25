@@ -40,30 +40,52 @@ export async function POST(req: NextRequest) {
 
     switch (type) {
       case 'order_placed': {
-        // Notify admin about new order
+        // Spoofing-hardened: previously the body's clientName / totalPrice /
+        // basketItems / userUid were trusted. A malicious customer could
+        // craft a fake "Order #X — 10M UZS" admin alert. Now we accept ONLY
+        // orderId, look up the real order from Firestore, and verify the
+        // caller owns it (or is staff). Server-derived data, no spoofing.
+        const orderId = String(data?.orderId ?? '').trim();
+        if (!orderId || orderId.length > 64) {
+          return NextResponse.json({ error: 'orderId required' }, { status: 400 });
+        }
+        const orderDoc = await adminApp.firestore().collection('orders').doc(orderId).get();
+        if (!orderDoc.exists) {
+          return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+        }
+        const o = orderDoc.data() ?? {};
+        const callerOwns = o.userUid === callerUid;
+        if (!callerOwns) {
+          const callerDoc = await adminApp.firestore().collection('user').doc(callerUid).get();
+          const role = callerDoc.exists ? callerDoc.data()?.role : null;
+          if (role !== 'admin' && role !== 'manager') {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+          }
+        }
+        const verifiedItems = (Array.isArray(o.basketItems) ? o.basketItems : []).map(
+          (i: { title?: string; quantity?: number }) => ({
+            title: String(i.title ?? ''),
+            quantity: Number(i.quantity ?? 0),
+          }),
+        );
+        // Notify admin about new order — verified data only
         await alertNewOrder({
-          id: data.orderId || '',
-          clientName: data.clientName || '',
-          clientPhone: data.clientPhone || '',
-          totalPrice: data.totalPrice || 0,
-          totalQuantity: data.totalQuantity || 0,
-          basketItems: (data.basketItems || []).map((i: { title: string; quantity: number }) => ({
-            title: i.title,
-            quantity: i.quantity,
-          })),
+          id: orderId,
+          clientName: String(o.clientName ?? ''),
+          clientPhone: String(o.clientPhone ?? ''),
+          totalPrice: Number(o.totalPrice ?? 0),
+          totalQuantity: Number(o.totalQuantity ?? 0),
+          basketItems: verifiedItems,
         });
         // Notify customer
-        if (data.userUid) {
+        if (o.userUid) {
           await notifyOrderConfirmed({
-            id: data.orderId || '',
-            clientName: data.clientName || '',
-            totalPrice: data.totalPrice || 0,
-            totalQuantity: data.totalQuantity || 0,
-            basketItems: (data.basketItems || []).map((i: { title: string; quantity: number }) => ({
-              title: i.title,
-              quantity: i.quantity,
-            })),
-            userUid: data.userUid,
+            id: orderId,
+            clientName: String(o.clientName ?? ''),
+            totalPrice: Number(o.totalPrice ?? 0),
+            totalQuantity: Number(o.totalQuantity ?? 0),
+            basketItems: verifiedItems,
+            userUid: String(o.userUid),
           });
         }
         break;
