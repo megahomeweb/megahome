@@ -136,6 +136,12 @@ export default function LabelMaker() {
       toast.error("Mahsulotlar yuklanmagan");
       return;
     }
+    // Confirm before destroying any work the admin may have done already.
+    if (rows.length > 0) {
+      if (!window.confirm(
+        `Joriy ${rows.length} ta qator oʻchirilib, barcha omborda bor mahsulotlar bilan almashtiriladi. Davom etamizmi?`,
+      )) return;
+    }
     const inStock = products.filter(
       (p) => (typeof p.stock === "number" ? p.stock : 0) > 0,
     );
@@ -153,7 +159,7 @@ export default function LabelMaker() {
     }));
     setRows(newRows);
     toast.success(`${newRows.length} ta mahsulot qoʻshildi`);
-  }, [products]);
+  }, [products, rows.length]);
 
   const handleImportFile = useCallback(
     async (file: File) => {

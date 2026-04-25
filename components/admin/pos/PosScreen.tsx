@@ -57,6 +57,11 @@ import {
 // ─────────────────────────────────────────────────────────────
 
 interface CartLine {
+  /** Stable row identity — required so duplicate-product rows can be edited
+   *  and deleted independently. WITHOUT this, removing one row of two
+   *  Coca-Cola entries would delete BOTH because filter()-by-productId
+   *  matches all duplicates. */
+  rowId: string;
   product: ProductT;
   /** null = empty input (no qty entered yet); 0 = explicit invalid; ≥1 = valid */
   qty: number | null;
@@ -64,6 +69,14 @@ interface CartLine {
   lineDiscount: { type: "pct" | "abs"; value: number } | null;
   /** Per-line note (e.g. customer-specific spec) — max 256 chars */
   note: string | null;
+}
+
+/** Cross-browser unique row id (crypto.randomUUID isn't on every target). */
+function newRowId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `row-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 type PaymentMode = "naqd" | "pul_otkazish" | "muddatli" | "qarz" | null;
@@ -193,8 +206,11 @@ export default function PosScreen() {
   // ─────────────────────────────────────────────────────────
   // Derived data
   // ─────────────────────────────────────────────────────────
+  // Customers only — exclude staff (admin AND manager) so the picker shows
+  // real buyers, not other employees. Earlier filter `u.role !== "admin"`
+  // accidentally let managers show up as customers.
   const filteredCustomers = useMemo(
-    () => users.filter((u) => u.role !== "admin"),
+    () => users.filter((u) => u.role === "user"),
     [users],
   );
 
@@ -323,7 +339,8 @@ export default function PosScreen() {
 
   // Called by the detail modal "Saqlash va yopish" — appends a NEW row.
   // Bito allows duplicate rows of the same product (per screenshot), so we
-  // always push rather than merge.
+  // always push rather than merge. Each row gets a stable `rowId` so
+  // duplicate-product rows are individually editable.
   const commitProductLine = useCallback(
     (
       product: ProductT,
@@ -334,6 +351,7 @@ export default function PosScreen() {
       setCart((prev) => [
         ...prev,
         {
+          rowId: newRowId(),
           product,
           qty: qty > 0 ? Math.floor(qty) : null,
           lineDiscount: lineDiscount && lineDiscount.value > 0 ? lineDiscount : null,
@@ -344,10 +362,12 @@ export default function PosScreen() {
     [],
   );
 
-  const setQty = useCallback((productId: string, raw: string) => {
+  // All operations target rows by `rowId`. Earlier `productId`-keyed versions
+  // would silently affect ALL duplicate rows of a given product.
+  const setQty = useCallback((rowId: string, raw: string) => {
     setCart((prev) =>
       prev.map((l) => {
-        if (l.product.id !== productId) return l;
+        if (l.rowId !== rowId) return l;
         if (raw === "") return { ...l, qty: null };
         const n = parseInt(raw, 10);
         if (Number.isNaN(n)) return { ...l, qty: null };
@@ -356,14 +376,16 @@ export default function PosScreen() {
     );
   }, []);
 
-  const cloneLine = useCallback((productId: string) => {
+  const cloneLine = useCallback((rowId: string) => {
     setCart((prev) => {
-      const idx = prev.findIndex((l) => l.product.id === productId);
+      const idx = prev.findIndex((l) => l.rowId === rowId);
       if (idx < 0) return prev;
       // Insert a duplicate row right after — same product, qty null,
-      // discount/note reset (clone is for fresh entry, not copy of all data)
+      // discount/note reset (clone is for fresh entry, not copy of all data).
+      // New row gets its own rowId so subsequent edits don't affect the source.
       const next = [...prev];
       next.splice(idx + 1, 0, {
+        rowId: newRowId(),
         product: prev[idx].product,
         qty: null,
         lineDiscount: null,
@@ -373,8 +395,8 @@ export default function PosScreen() {
     });
   }, []);
 
-  const removeLine = useCallback((productId: string) => {
-    setCart((prev) => prev.filter((l) => l.product.id !== productId));
+  const removeLine = useCallback((rowId: string) => {
+    setCart((prev) => prev.filter((l) => l.rowId !== rowId));
   }, []);
 
   const clearCart = useCallback(() => {
@@ -641,7 +663,9 @@ export default function PosScreen() {
                     e.preventDefault();
                     addProduct(filteredProducts[0]);
                     setProductSearch("");
-                    productSearchRef.current?.focus();
+                    setShowProductPicker(false);
+                    // Don't re-focus search — the product modal will mount
+                    // and its own autoFocus will land on the qty input.
                   }
                 }}
                 className="w-full pl-10 pr-20 py-3 rounded-xl border border-gray-200 bg-white text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
@@ -690,7 +714,9 @@ export default function PosScreen() {
                           onClick={() => {
                             addProduct(p);
                             setProductSearch("");
-                            productSearchRef.current?.focus();
+                            setShowProductPicker(false);
+                            // Don't re-focus search — the modal's autoFocus
+                            // will land on its qty input.
                           }}
                           className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:bg-gray-100 transition text-left"
                         >
@@ -829,12 +855,12 @@ export default function PosScreen() {
               <div className="space-y-0.5 mt-1">
                 {cart.map((line, idx) => (
                   <CartRow
-                    key={line.product.id + idx}
+                    key={line.rowId}
                     index={idx + 1}
                     line={line}
-                    onSetQty={(raw) => setQty(line.product.id, raw)}
-                    onClone={() => cloneLine(line.product.id)}
-                    onRemove={() => removeLine(line.product.id)}
+                    onSetQty={(raw) => setQty(line.rowId, raw)}
+                    onClone={() => cloneLine(line.rowId)}
+                    onRemove={() => removeLine(line.rowId)}
                   />
                 ))}
               </div>
