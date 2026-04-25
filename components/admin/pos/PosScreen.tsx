@@ -59,6 +59,10 @@ interface CartLine {
   product: ProductT;
   /** null = empty input (no qty entered yet); 0 = explicit invalid; ≥1 = valid */
   qty: number | null;
+  /** Per-line discount entered in the bito-style detail modal */
+  lineDiscount: { type: "pct" | "abs"; value: number } | null;
+  /** Per-line note (e.g. customer-specific spec) — max 256 chars */
+  note: string | null;
 }
 
 type PaymentMode = "naqd" | "pul_otkazish" | "muddatli" | "qarz" | null;
@@ -134,6 +138,9 @@ export default function PosScreen() {
   const [showFilter, setShowFilter] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(false); // mobile drawer
   const [stage, setStage] = useState<Stage>("shopping");
+
+  // Product detail modal — opens when admin clicks a product (bito flow)
+  const [pendingProduct, setPendingProduct] = useState<ProductT | null>(null);
 
   // ── Inline customer search (right panel) ────────────────
   const [customerQuery, setCustomerQuery] = useState("");
@@ -252,8 +259,35 @@ export default function PosScreen() {
   }, [products]);
 
   // ── Cart math (bito-faithful: rows with null/0 qty contribute 0) ──
+  // Returns gross line total (qty * price) — before line discount.
+  const lineGross = (l: CartLine) =>
+    l.qty && l.qty > 0 ? Number(l.product.price) * l.qty : 0;
+  // Returns the absolute UZS amount discounted on this line.
+  const lineDiscountAmount = (l: CartLine) => {
+    if (!l.lineDiscount || !l.lineDiscount.value) return 0;
+    const gross = lineGross(l);
+    if (gross <= 0) return 0;
+    if (l.lineDiscount.type === "pct") {
+      return Math.round(gross * Math.min(100, l.lineDiscount.value) / 100);
+    }
+    return Math.min(Math.round(l.lineDiscount.value), gross);
+  };
+  // Net for one line = gross − line discount.
+  const lineNet = (l: CartLine) => lineGross(l) - lineDiscountAmount(l);
+
+  // Subtotal = sum of NET line totals (bito's "Jami narxi" already includes
+  // any per-line discount — that's how bito's "Jami" tile reads).
   const subtotal = useMemo(
-    () => cart.reduce((s, l) => s + (l.qty && l.qty > 0 ? Number(l.product.price) * l.qty : 0), 0),
+    () => cart.reduce((s, l) => s + lineNet(l), 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cart],
+  );
+  // Sum of all line discounts — surfaced separately in payment flow so the
+  // server can apply them as a single ticket-level discount (the math is
+  // equivalent to per-line application).
+  const lineDiscountsTotal = useMemo(
+    () => cart.reduce((s, l) => s + lineDiscountAmount(l), 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [cart],
   );
   const totalQty = useMemo(
@@ -279,21 +313,33 @@ export default function PosScreen() {
   // ─────────────────────────────────────────────────────────
   // Cart actions
   // ─────────────────────────────────────────────────────────
+  // Click product in dropdown → opens bito-style detail modal (NOT direct add)
   const addProduct = useCallback((product: ProductT) => {
-    setCart((prev) => {
-      const existing = prev.find((l) => l.product.id === product.id);
-      if (existing) {
-        // If already in cart, increment by 1 (treats as next unit)
-        return prev.map((l) =>
-          l.product.id === product.id
-            ? { ...l, qty: (l.qty ?? 0) + 1 }
-            : l,
-        );
-      }
-      // First add: empty quantity (matches bito's behaviour exactly)
-      return [...prev, { product, qty: null }];
-    });
+    setPendingProduct(product);
   }, []);
+
+  // Called by the detail modal "Saqlash va yopish" — appends a NEW row.
+  // Bito allows duplicate rows of the same product (per screenshot), so we
+  // always push rather than merge.
+  const commitProductLine = useCallback(
+    (
+      product: ProductT,
+      qty: number,
+      lineDiscount: { type: "pct" | "abs"; value: number } | null,
+      note: string | null,
+    ) => {
+      setCart((prev) => [
+        ...prev,
+        {
+          product,
+          qty: qty > 0 ? Math.floor(qty) : null,
+          lineDiscount: lineDiscount && lineDiscount.value > 0 ? lineDiscount : null,
+          note: note?.trim() ? note.trim().slice(0, 256) : null,
+        },
+      ]);
+    },
+    [],
+  );
 
   const setQty = useCallback((productId: string, raw: string) => {
     setCart((prev) =>
@@ -311,9 +357,15 @@ export default function PosScreen() {
     setCart((prev) => {
       const idx = prev.findIndex((l) => l.product.id === productId);
       if (idx < 0) return prev;
-      // Insert a duplicate row right after — same product, qty null again
+      // Insert a duplicate row right after — same product, qty null,
+      // discount/note reset (clone is for fresh entry, not copy of all data)
       const next = [...prev];
-      next.splice(idx + 1, 0, { product: prev[idx].product, qty: null });
+      next.splice(idx + 1, 0, {
+        product: prev[idx].product,
+        qty: null,
+        lineDiscount: null,
+        note: null,
+      });
       return next;
     });
   }, []);
@@ -377,16 +429,34 @@ export default function PosScreen() {
           });
         }
 
+        // Server expects gross subtotal in totalPriceHint (it computes
+        // gross from product prices on its side). We aggregate per-line
+        // discounts + ticket-level discount into one absolute discount.
+        const grossSubtotal = validLines.reduce((s, l) => s + lineGross(l), 0);
+        const aggregateDiscountAbs = lineDiscountsTotal + discountAmount;
+
+        // Concatenate per-line notes + responsible-person note into one
+        // server-stored orderNote so all real data flows through.
+        const lineNotes = validLines
+          .filter((l) => l.note)
+          .map((l) => `• ${l.product.title}: ${l.note}`)
+          .join("\n");
+        const combinedNote = [responsibleNote, lineNotes].filter(Boolean).join("\n---\n") || undefined;
+
         const result = await createOrder({
           items: validLines.map(({ product, qty }) => ({ productId: product.id, quantity: qty as number })),
           clientName: customer?.name ?? "Mijoz",
           clientPhone: customer?.phone ?? "",
           targetUserUid: customer?.uid,
-          totalPriceHint: subtotal,
+          totalPriceHint: grossSubtotal,
           paymentBreakdown: breakdown,
-          ticketDiscount: discount.value > 0 ? discount : undefined,
+          // Pass aggregate as absolute UZS — math is equivalent to per-line
+          // application at server level.
+          ticketDiscount: aggregateDiscountAbs > 0
+            ? { type: "abs", value: aggregateDiscountAbs }
+            : undefined,
           source: "pos",
-          orderNote: responsibleNote || undefined,
+          orderNote: combinedNote,
         });
 
         if (!result.ok) {
@@ -420,7 +490,8 @@ export default function PosScreen() {
         setSubmitting(false);
       }
     },
-    [cart, netTotal, customer, subtotal, discount, createOrder, responsibleNote],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cart, netTotal, customer, subtotal, discount, discountAmount, lineDiscountsTotal, createOrder, responsibleNote],
   );
 
   // ─────────────────────────────────────────────────────────
@@ -484,6 +555,7 @@ export default function PosScreen() {
               if (cart.length === 0) return toast.error("Savat boʻsh");
               const valid = cart.filter((l) => l.qty && l.qty > 0);
               if (valid.length === 0) return toast.error("Hech qanday tasdiqlangan miqdor yoʻq");
+              const grossSub = valid.reduce((s, l) => s + lineGross(l), 0);
               printCartPreview({
                 customerName: customer?.name ?? "Mijoz",
                 customerPhone: customer?.phone ?? "",
@@ -492,9 +564,11 @@ export default function PosScreen() {
                   title: l.product.title,
                   qty: l.qty as number,
                   price: Number(l.product.price),
+                  lineDiscount: lineDiscountAmount(l) || undefined,
+                  note: l.note ?? undefined,
                 })),
-                subtotal,
-                discountAmount,
+                subtotal: grossSub,
+                discountAmount: lineDiscountsTotal + discountAmount,
                 total: netTotal,
               });
             }}
@@ -850,6 +924,20 @@ export default function PosScreen() {
         />
       )}
 
+      {/* ── Product detail modal (bito click-to-add flow) ────── */}
+      {pendingProduct && (
+        <PosProductDetailModal
+          product={pendingProduct}
+          onSave={(qty, lineDiscount, note) => {
+            commitProductLine(pendingProduct, qty, lineDiscount, note);
+            setPendingProduct(null);
+            // Re-focus search for fast multi-add workflow
+            setTimeout(() => productSearchRef.current?.focus(), 50);
+          }}
+          onClose={() => setPendingProduct(null)}
+        />
+      )}
+
       {/* ── Mas'ul shaxs modal ──────────────────────────────────── */}
       {showResponsibleModal && (
         <ResponsibleModal
@@ -945,7 +1033,15 @@ function CartRow({
 }) {
   const { product, qty } = line;
   const isInvalid = qty === null || qty === 0;
-  const lineTotal = qty && qty > 0 ? Number(product.price) * qty : 0;
+  const grossLine = qty && qty > 0 ? Number(product.price) * qty : 0;
+  const lineDiscAmt = (() => {
+    if (!line.lineDiscount || !line.lineDiscount.value || grossLine <= 0) return 0;
+    if (line.lineDiscount.type === "pct") {
+      return Math.round((grossLine * Math.min(100, line.lineDiscount.value)) / 100);
+    }
+    return Math.min(Math.round(line.lineDiscount.value), grossLine);
+  })();
+  const netLine = grossLine - lineDiscAmt;
   const stockNum = typeof product.stock === "number" ? product.stock : 0;
   const stockOver = !!qty && qty > stockNum;
 
@@ -1005,14 +1101,26 @@ function CartRow({
         {formatNumber(Number(product.price))}
       </span>
 
-      {/* Jami narxi — 0 if invalid, calculated otherwise */}
-      <span
-        className={`text-sm pt-2.5 text-right tabular-nums font-semibold ${
-          isInvalid ? "text-gray-400" : "text-gray-900"
-        }`}
-      >
-        {isInvalid ? "0" : formatNumber(lineTotal)}
-      </span>
+      {/* Jami narxi — 0 if invalid, otherwise NET (after per-line discount) */}
+      <div className="pt-2.5 text-right">
+        <p
+          className={`text-sm tabular-nums font-semibold ${
+            isInvalid ? "text-gray-400" : "text-gray-900"
+          }`}
+        >
+          {isInvalid ? "0" : formatNumber(netLine)}
+        </p>
+        {lineDiscAmt > 0 && (
+          <p className="text-[10px] text-amber-600 tabular-nums">
+            −{formatNumber(lineDiscAmt)}
+          </p>
+        )}
+        {line.note && (
+          <p className="text-[10px] text-blue-500 truncate max-w-[80px] ml-auto" title={line.note}>
+            📝 {line.note.slice(0, 16)}{line.note.length > 16 ? "…" : ""}
+          </p>
+        )}
+      </div>
 
       {/* Actions */}
       <div className="flex items-center gap-1 pt-1.5 justify-end">
@@ -1508,7 +1616,7 @@ function printCartPreview(opts: {
   customerName: string;
   customerPhone: string;
   sellerName: string;
-  items: Array<{ title: string; qty: number; price: number }>;
+  items: Array<{ title: string; qty: number; price: number; lineDiscount?: number; note?: string }>;
   subtotal: number;
   discountAmount: number;
   total: number;
@@ -1516,17 +1624,24 @@ function printCartPreview(opts: {
   const now = new Date();
   const dateStr = now.toLocaleString("uz-UZ");
   const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(n).replace(/,/g, " ");
+  const escape = (s: string) => s.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c] || c);
   const rows = opts.items
-    .map(
-      (i, idx) => `
+    .map((i, idx) => {
+      const gross = i.qty * i.price;
+      const net = gross - (i.lineDiscount || 0);
+      const noteRow = i.note ? `<tr><td></td><td colspan="4" style="font-size:11px;color:#666;font-style:italic">📝 ${escape(i.note)}</td></tr>` : "";
+      const discRow = i.lineDiscount
+        ? `<tr><td></td><td colspan="3" style="font-size:11px;color:#c2410c;text-align:right">chegirma:</td><td style="text-align:right;color:#c2410c;font-size:11px">−${fmt(i.lineDiscount)}</td></tr>`
+        : "";
+      return `
         <tr>
           <td style="text-align:center">${idx + 1}</td>
-          <td>${i.title.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c] || c)}</td>
+          <td>${escape(i.title)}</td>
           <td style="text-align:center">${i.qty}</td>
           <td style="text-align:right">${fmt(i.price)}</td>
-          <td style="text-align:right;font-weight:bold">${fmt(i.qty * i.price)}</td>
-        </tr>`,
-    )
+          <td style="text-align:right;font-weight:bold">${fmt(net)}</td>
+        </tr>${discRow}${noteRow}`;
+    })
     .join("");
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Chek — MegaHome</title>
     <style>
@@ -1859,6 +1974,348 @@ function ResponsibleModal({
           Saqlash va yopish
         </Button>
       </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Product detail modal — bito-faithful click-to-add flow
+// ─────────────────────────────────────────────────────────────
+function PosProductDetailModal({
+  product,
+  onSave,
+  onClose,
+}: {
+  product: ProductT;
+  onSave: (
+    qty: number,
+    lineDiscount: { type: "pct" | "abs"; value: number } | null,
+    note: string | null,
+  ) => void;
+  onClose: () => void;
+}) {
+  const [qtyStr, setQtyStr] = useState("");
+  const [discountStr, setDiscountStr] = useState("");
+  const [discountType, setDiscountType] = useState<"pct" | "abs">("pct");
+  const [note, setNote] = useState("");
+  const [activeField, setActiveField] = useState<"qty" | "discount">("qty");
+
+  const price = Number(product.price) || 0;
+  const stockNum = typeof product.stock === "number" ? product.stock : 0;
+  const qty = qtyStr === "" ? 0 : Math.max(0, Math.floor(Number(qtyStr) || 0));
+  const isQtyInvalid = qty <= 0;
+
+  const gross = qty * price;
+  const discountValue = parseFloat(discountStr || "0") || 0;
+  const discountAmt = (() => {
+    if (gross <= 0 || discountValue <= 0) return 0;
+    if (discountType === "pct") {
+      return Math.round((gross * Math.min(100, discountValue)) / 100);
+    }
+    return Math.min(Math.round(discountValue), gross);
+  })();
+  const netLine = gross - discountAmt;
+
+  const append = (s: string) => {
+    if (activeField === "qty") {
+      setQtyStr((curr) => {
+        const cleaned = curr.replace(/^0+/, "");
+        const next = (cleaned + s).replace(/[^0-9]/g, "");
+        return next.slice(0, 9);
+      });
+    } else {
+      setDiscountStr((curr) => {
+        const next = (curr + s).replace(/[^0-9.]/g, "");
+        return next.slice(0, 12);
+      });
+    }
+  };
+  const handleDot = () => {
+    if (activeField === "discount" && !discountStr.includes(".")) {
+      setDiscountStr((s) => (s === "" ? "0." : s + "."));
+    }
+  };
+  const handleBackspace = () => {
+    if (activeField === "qty") setQtyStr((s) => s.slice(0, -1));
+    else setDiscountStr((s) => s.slice(0, -1));
+  };
+  const handleClear = () => {
+    if (activeField === "qty") setQtyStr("");
+    else setDiscountStr("");
+  };
+
+  const canSave = qty > 0;
+
+  const handleSave = () => {
+    if (!canSave) return;
+    onSave(
+      qty,
+      discountValue > 0 ? { type: discountType, value: discountValue } : null,
+      note.trim() || null,
+    );
+  };
+
+  // Keyboard: Enter saves, Esc closes
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === "Enter" && canSave) {
+        const t = e.target as HTMLElement | null;
+        if (t?.tagName !== "TEXTAREA") {
+          e.preventDefault();
+          handleSave();
+        }
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canSave, qty, discountValue, discountType, note]);
+
+  const Key = ({ label, onClick, wide }: { label: React.ReactNode; onClick: () => void; wide?: boolean }) => (
+    <button
+      onClick={onClick}
+      className={`bg-white border border-gray-200 rounded-xl text-base sm:text-lg font-semibold text-gray-800 hover:bg-gray-50 active:scale-95 active:bg-gray-100 transition shadow-sm ${
+        wide ? "col-span-2" : ""
+      } h-14`}
+    >
+      {label}
+    </button>
+  );
+
+  const sku = (product.id || "").slice(0, 8).toUpperCase();
+  const fmt = (n: number) => formatNumber(Math.round(n));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl w-full max-w-4xl max-h-[95vh] overflow-y-auto shadow-2xl">
+        <button
+          onClick={onClose}
+          aria-label="Yopish"
+          className="absolute top-3 right-3 p-1.5 hover:bg-gray-100 rounded-lg active:scale-95 transition z-10"
+        >
+          <X className="size-5 text-gray-500" />
+        </button>
+
+        <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-[140px_1fr_1fr] gap-4 sm:gap-6">
+          {/* ── Image ── */}
+          <div className="hidden md:block">
+            <div className="relative w-full aspect-square rounded-xl bg-gray-100 overflow-hidden">
+              {product.productImageUrl?.[0]?.url ? (
+                <Image
+                  src={product.productImageUrl[0].url}
+                  alt={product.title}
+                  fill
+                  className="object-cover"
+                  sizes="140px"
+                />
+              ) : (
+                <div className="size-full flex items-center justify-center">
+                  <Package className="size-10 text-gray-300" />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── Info + form column ── */}
+          <div className="min-w-0">
+            <div className="md:hidden flex items-center gap-3 mb-3">
+              <div className="relative size-16 rounded-xl bg-gray-100 overflow-hidden shrink-0">
+                {product.productImageUrl?.[0]?.url ? (
+                  <Image src={product.productImageUrl[0].url} alt={product.title} fill className="object-cover" sizes="64px" />
+                ) : (
+                  <div className="size-full flex items-center justify-center"><Package className="size-6 text-gray-300" /></div>
+                )}
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-base font-bold text-gray-900 truncate">{product.title}</h2>
+                <p className="text-[11px] text-gray-500">SKU: {sku}</p>
+              </div>
+            </div>
+            <div className="hidden md:block">
+              <h2 className="text-xl font-bold text-gray-900">{product.title}</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Barkod: <span className="text-gray-700 font-medium">{sku}</span>
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                SKU: <span className="text-gray-700 font-medium">{sku}</span>
+              </p>
+            </div>
+
+            {/* Pseudo-dropdowns (bito v1: single-option, locked) */}
+            <div className="mt-3 space-y-2">
+              <FieldLabelRow label="Birligi:">
+                <FakeSelect value="dona (Asosiy)" />
+              </FieldLabelRow>
+              <FieldLabelRow label="Ombor:">
+                <FakeSelect value={`Asosiy (${stockNum} dona)`} />
+              </FieldLabelRow>
+              <FieldLabelRow label="Narx:">
+                <FakeSelect value={`chakana (${formatUZS(price)})`} />
+              </FieldLabelRow>
+            </div>
+
+            {/* Miqdor + Narx row */}
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Miqdor</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={qtyStr}
+                  onChange={(e) => setQtyStr(e.target.value.replace(/[^0-9]/g, ""))}
+                  onFocus={() => setActiveField("qty")}
+                  autoFocus
+                  placeholder="0"
+                  className={`w-full h-10 px-3 rounded-lg text-sm font-semibold tabular-nums outline-none transition ${
+                    isQtyInvalid
+                      ? "border border-red-400 bg-red-50/60 text-red-700 focus:ring-2 focus:ring-red-100"
+                      : "border border-gray-300 bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                  } ${activeField === "qty" ? "ring-2 ring-blue-100 border-blue-400" : ""}`}
+                />
+                {isQtyInvalid && (
+                  <p className="text-[11px] text-red-500 mt-1">0 dan katta qiymat kiriting</p>
+                )}
+                {qty > stockNum && (
+                  <p className="text-[11px] text-amber-600 mt-1">Omborda atigi {stockNum} dona</p>
+                )}
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Narx</label>
+                <input
+                  type="text"
+                  readOnly
+                  value={fmt(price)}
+                  className="w-full h-10 px-3 rounded-lg border border-gray-200 bg-gray-50 text-sm font-semibold tabular-nums text-gray-700 outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Jami narxi */}
+            <div className="mt-3">
+              <label className="text-xs font-medium text-gray-600 block mb-1">Jami narxi</label>
+              <input
+                type="text"
+                readOnly
+                value={fmt(netLine)}
+                className="w-full h-10 px-3 rounded-lg border border-gray-200 bg-gray-50 text-base font-bold tabular-nums text-gray-900 outline-none"
+              />
+              {discountAmt > 0 && (
+                <p className="text-[11px] text-gray-500 mt-1">
+                  {fmt(gross)} − chegirma {fmt(discountAmt)} = <span className="font-bold text-gray-900">{fmt(netLine)}</span>
+                </p>
+              )}
+            </div>
+
+            {/* Per-line discount */}
+            <div className="mt-3 flex items-stretch gap-2">
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="Chegirmani kiriting"
+                value={discountStr}
+                onChange={(e) => setDiscountStr(e.target.value.replace(/[^0-9.]/g, ""))}
+                onFocus={() => setActiveField("discount")}
+                className={`flex-1 h-10 px-3 rounded-lg border bg-white text-sm tabular-nums outline-none transition ${
+                  activeField === "discount" ? "border-blue-400 ring-2 ring-blue-100" : "border-gray-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                }`}
+              />
+              <div className="flex bg-gray-100 rounded-lg p-0.5">
+                <button
+                  onClick={() => setDiscountType("pct")}
+                  className={`px-3 rounded-md text-sm font-bold transition ${
+                    discountType === "pct" ? "bg-blue-500 text-white shadow-sm" : "text-gray-500 hover:bg-gray-200"
+                  }`}
+                >%</button>
+                <button
+                  onClick={() => setDiscountType("abs")}
+                  className={`px-3 rounded-md text-xs font-bold transition ${
+                    discountType === "abs" ? "bg-blue-500 text-white shadow-sm" : "text-gray-500 hover:bg-gray-200"
+                  }`}
+                >so&apos;m</button>
+              </div>
+            </div>
+
+            {/* Izoh */}
+            <div className="mt-3">
+              <textarea
+                placeholder="Izoh"
+                value={note}
+                onChange={(e) => setNote(e.target.value.slice(0, 256))}
+                rows={2}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 resize-none"
+              />
+              <p className="text-[10px] text-gray-400 text-right mt-0.5">{note.length} / 256</p>
+            </div>
+          </div>
+
+          {/* ── Numeric keypad column ── */}
+          <div className="flex flex-col">
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              <Key label="1" onClick={() => append("1")} />
+              <Key label="2" onClick={() => append("2")} />
+              <Key label="3" onClick={() => append("3")} />
+              <Key label="4" onClick={() => append("4")} />
+              <Key label="5" onClick={() => append("5")} />
+              <Key label="6" onClick={() => append("6")} />
+              <Key label="7" onClick={() => append("7")} />
+              <Key label="8" onClick={() => append("8")} />
+              <Key label="9" onClick={() => append("9")} />
+              <Key label="0" onClick={() => append("0")} />
+              <Key
+                label="."
+                onClick={handleDot}
+              />
+              <button
+                onClick={handleBackspace}
+                aria-label="Backspace"
+                className="bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-800 active:scale-95 transition shadow-sm flex items-center justify-center h-14"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="size-5"><path d="M12 5L4 12l8 7" /><path d="M20 12H4" /><line x1="9" y1="9" x2="13" y2="14" /><line x1="9" y1="14" x2="13" y2="9" /></svg>
+              </button>
+              <Key label="000" onClick={() => append("000")} />
+              <Key label="00" onClick={() => append("00")} />
+              <button
+                onClick={handleClear}
+                className="bg-white border border-gray-200 rounded-xl text-base font-semibold text-red-500 hover:bg-red-50 active:scale-95 transition shadow-sm h-14"
+              >
+                C
+              </button>
+            </div>
+
+            <button
+              onClick={handleSave}
+              disabled={!canSave}
+              className="mt-auto h-14 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-base font-bold rounded-xl active:scale-[0.99] transition shadow-md shadow-blue-500/30"
+            >
+              Saqlash va yopish
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FieldLabelRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-xs text-gray-600 mb-1">{label}</p>
+      {children}
+    </div>
+  );
+}
+
+function FakeSelect({ value }: { value: string }) {
+  return (
+    <div className="w-full h-9 px-3 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-700 flex items-center justify-between">
+      <span className="truncate">{value}</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="size-4 text-gray-400 shrink-0">
+        <polyline points="6 9 12 15 18 9" />
+      </svg>
     </div>
   );
 }
