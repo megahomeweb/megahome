@@ -1,6 +1,6 @@
 "use client"
 import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
 
 interface ProtectedRouteProps {
@@ -10,51 +10,84 @@ interface ProtectedRouteProps {
   redirectTo?: string
 }
 
-const ProtectedRoute = ({ 
-  children, 
-  requireAuth = true, 
+const ProtectedRoute = ({
+  children,
+  requireAuth = true,
   adminOnly = false,
-  redirectTo 
+  redirectTo,
 }: ProtectedRouteProps) => {
   const router = useRouter()
-  const { isAuthenticated, userData, isLoading, isAdmin, hasAdminAccess } = useAuthStore()
+  const pathname = usePathname()
+  const { isAuthenticated, userData, isLoading, hasAdminAccess } = useAuthStore()
+
+  // Intermediate state: Firebase says "authenticated" but the Firestore
+  // user doc (which carries the role) hasn't arrived yet. If we let the
+  // role check run here, hasAdminAccess() returns false (no role to read)
+  // and an admin gets bounced to '/' the instant their auth state flips,
+  // before AuthProvider's getDoc has a chance to populate userData. Treat
+  // it as "still loading" — the spinner shows for ~50–200ms then resolves.
+  const userDataPending = isAuthenticated && !userData
 
   useEffect(() => {
-    if (!isLoading) {
-      if (requireAuth && !isAuthenticated) {
-        router.push('/')
-        return
-      }
+    if (isLoading || userDataPending) return
 
-      // Admin panel: allow admin and manager roles
-      if (adminOnly && isAuthenticated && !hasAdminAccess()) {
-        router.push('/')
-        return
-      }
+    if (requireAuth && !isAuthenticated) {
+      // For admin paths send to /login with a redirect param so we can
+      // return to the originally-requested page after sign-in. For other
+      // protected pages keep the legacy '/' destination.
+      const isAdminPath = adminOnly || pathname.startsWith('/admin')
+      const target = isAdminPath
+        ? `/login?redirect=${encodeURIComponent(pathname || '/admin')}`
+        : '/'
+      router.push(target)
+      return
+    }
 
-      if (redirectTo && isAuthenticated) {
-        if (hasAdminAccess()) {
-          router.push('/admin')
-        } else {
-          router.push('/')
-        }
-        return
+    if (adminOnly && isAuthenticated && !hasAdminAccess()) {
+      router.push('/')
+      return
+    }
+
+    if (redirectTo && isAuthenticated) {
+      // Read ?redirect from window directly. Using next/navigation's
+      // useSearchParams here forces every page that mounts ProtectedRoute
+      // (i.e. all of /admin/*) into dynamic rendering, which broke the
+      // build on statically-prerendered admin pages. The effect only runs
+      // client-side, so window.location is always defined.
+      const search = typeof window !== 'undefined' ? window.location.search : ''
+      const next = new URLSearchParams(search).get('redirect')
+      const safeNext = next && next.startsWith('/') && !next.startsWith('//') ? next : null
+      if (safeNext) {
+        router.push(safeNext)
+      } else if (hasAdminAccess()) {
+        router.push('/admin')
+      } else {
+        router.push('/')
       }
     }
-  }, [isAuthenticated, userData, isLoading, requireAuth, adminOnly, redirectTo, router, isAdmin, hasAdminAccess])
+  }, [
+    isAuthenticated,
+    userData,
+    isLoading,
+    userDataPending,
+    requireAuth,
+    adminOnly,
+    redirectTo,
+    router,
+    pathname,
+    hasAdminAccess,
+  ])
 
-  // Loading state
-  if (isLoading) {
+  if (isLoading || userDataPending) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-white"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-400"></div>
       </div>
     )
   }
 
-  // Agar authentication talab qilinsa va user login qilmagan bo'lsa
   if (requireAuth && !isAuthenticated) {
-    return null // router.push ishga tushguncha
+    return null
   }
 
   if (adminOnly && isAuthenticated && !hasAdminAccess()) {

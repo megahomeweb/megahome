@@ -7,31 +7,13 @@ import { SubmitHandler, useForm } from 'react-hook-form';
 import toast from 'react-hot-toast'
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth, fireDB } from '@/firebase/config';
-import { collection, query, where, onSnapshot, DocumentData } from 'firebase/firestore'
+import { doc, getDoc } from 'firebase/firestore'
 import { FirebaseError } from 'firebase/app';
-
-interface User {
-  name: string;
-  uid: string;
-  time: {
-    seconds: number;
-    nanoseconds: number;
-  };
-  date: string;
-  role: string;
-  email: string;
-}
+import { useAuthStore, type UserData } from '@/store/authStore';
 
 interface LoginFormInputs {
   email: string
   password: string
-}
-
-const isUser = (data: DocumentData): data is User => {
-  return data && 
-         typeof data.uid === 'string' && 
-         typeof data.email === 'string' && 
-         typeof data.role === 'string'
 }
 
 const LoginForm = () => {
@@ -52,71 +34,87 @@ const LoginForm = () => {
 
   const userLoginFunction: SubmitHandler<LoginFormInputs> = async (data) => {
     setLoading(true)
-    
+
     try {
-      // Firebase authentication
+      // 1. Authenticate with Firebase Auth.
       const userCredential = await signInWithEmailAndPassword(auth, data.email, data.password);
       const user = userCredential.user
 
-      // Query user data from Firestore
-      const q = query(
-        collection(fireDB, "user"),
-        where('uid', '==', user.uid)
-      )
+      // 2. Read user profile from Firestore (single round-trip; was a
+      //    realtime onSnapshot listener that never needed to be realtime).
+      const userSnap = await getDoc(doc(fireDB, 'user', user.uid))
+      if (!userSnap.exists()) {
+        // The Auth account exists but no Firestore profile — orphaned
+        // signup, or doc deleted. Surface this clearly instead of leaving
+        // the user staring at a frozen "Kirilyapti..." button.
+        toast.error("Profil topilmadi. Iltimos, administrator bilan bog'laning.")
+        setLoading(false)
+        return
+      }
+      const userData = { ...(userSnap.data() as UserData), uid: user.uid }
+      if (!userData.role) {
+        toast.error("Foydalanuvchi roli aniqlanmadi")
+        setLoading(false)
+        return
+      }
 
-      // Use onSnapshot for real-time listener (though for login, a one-time fetch might be better)
-      const unsubscribe = onSnapshot(q, async (querySnapshot) => {
-        let userData: User | undefined
-        
-        querySnapshot.forEach((doc) => {
-          const docData = doc.data()
-          if (isUser(docData)) {
-            userData = docData
-          }
+      // 3. Mint the server-signed session cookie. This MUST succeed for
+      //    middleware to let the user through to /admin — previously the
+      //    error was swallowed (// best-effort) so a misconfigured
+      //    SESSION_SECRET produced a silent loop: success toast →
+      //    router.push('/admin') → middleware bounces back to /login.
+      try {
+        const idToken = await user.getIdToken()
+        const res = await fetch('/api/auth/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken }),
         })
-
-        if (userData) {
-          // Reset form
-          reset()
-
-          // Create server-signed session cookie
-          try {
-            const idToken = await user.getIdToken()
-            await fetch('/api/auth/session', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ idToken }),
-            })
-          } catch {
-            // Session creation best-effort
-          }
-
-          // Success message
-          toast.success("Tizimga muvaffaqiyatli kirdingiz")
-
-          // Navigation based on user role
-          if (userData?.role === "admin" || userData?.role === "manager") {
-            router.push('/admin')
-          } else {
-            router.push('/')
-          }
-        } else {
-          toast.error("Foydalanuvchi topilmadi yoki ma'lumotlar noto'g'ri")
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({} as Record<string, unknown>))
+          const msg = (body as { error?: string })?.error || `Sessiya yaratilmadi (${res.status})`
+          console.error('Session POST failed', res.status, body)
+          toast.error(msg)
+          setLoading(false)
+          return
         }
-        
+      } catch (err) {
+        console.error('Session network error', err)
+        toast.error("Sessiya yaratilmadi: tarmoq xatosi")
         setLoading(false)
-        // Unsubscribe from the listener
-        unsubscribe()
-      }, (error) => {
-        console.error('Firestore error:', error)
-        toast.error("Foydalanuvchi ma'lumotlarini olishda xatolik yuz berdi")
-        setLoading(false)
-      })
+        return
+      }
 
-    } catch (error) {    
+      // 4. Hydrate the Zustand store BEFORE navigating. AuthProvider's
+      //    onAuthStateChanged also fires and writes the same data, but it
+      //    races with the navigation — if router.push('/admin') wins,
+      //    AdminLayout mounts with userData=null and ProtectedRoute can't
+      //    decide whether to allow the page. Writing here makes the
+      //    decision deterministic on the very first paint.
+      const { setUser, setUserData } = useAuthStore.getState()
+      setUser(user)
+      setUserData(userData)
+
+      reset()
+      toast.success("Tizimga muvaffaqiyatli kirdingiz")
+
+      // 5. Honour ?redirect=/admin/... so a user bounced from a deep admin
+      //    page lands back where they were trying to go. Read directly
+      //    from window so we don't drag in next/navigation's
+      //    useSearchParams (which would force /login out of static
+      //    rendering and break the production build).
+      const search = typeof window !== 'undefined' ? window.location.search : ''
+      const redirectParam = new URLSearchParams(search).get('redirect')
+      const safeRedirect =
+        redirectParam && redirectParam.startsWith('/') && !redirectParam.startsWith('//')
+          ? redirectParam
+          : null
+
+      const isStaff = userData.role === 'admin' || userData.role === 'manager'
+      router.push(safeRedirect || (isStaff ? '/admin' : '/'))
+    } catch (error) {
       setLoading(false)
       if (error instanceof FirebaseError) {
-        // Handle specific Firebase auth errors
         switch (error.code) {
           case 'auth/invalid-credential':
             toast.error("Email noto‘g‘ri yoki parol xato")
@@ -127,10 +125,15 @@ const LoginForm = () => {
           case 'auth/too-many-requests':
             toast.error("Juda ko'p urinish. Iltimos, keyinroq qayta urinib ko'ring")
             break
+          case 'auth/network-request-failed':
+            toast.error("Internet aloqasi yo'q. Tarmoqni tekshiring")
+            break
           default:
+            console.error('Login error', error.code, error.message)
             toast.error("Kirish amalga oshmadi. Iltimos, qayta urinib ko'ring")
         }
       } else {
+        console.error('Login unknown error', error)
         toast.error("Noma'lum xatolik yuz berdi")
       }
     }

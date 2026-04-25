@@ -46,10 +46,18 @@ export const useAuthStore = create<AuthState>()(
       isfetchLoading: true,
 
       setUser: (user) => {
-        set({ 
-          user, 
+        // Do NOT touch isLoading here. AuthProvider drives the loading
+        // lifecycle: it calls setLoading(true) at the start of an auth
+        // event, then setUser, then awaits the userData fetch, then
+        // setLoading(false). Previously setUser flipped isLoading=false
+        // mid-flight, opening a window where the store advertised
+        // {isAuthenticated: true, userData: null, isLoading: false}.
+        // ProtectedRoute saw that window on admin login and bounced the
+        // user to '/' before their role had been read from Firestore —
+        // looked exactly like "login succeeds but no redirect to /admin".
+        set({
+          user,
           isAuthenticated: !!user,
-          isLoading: false
         })
       },
 
