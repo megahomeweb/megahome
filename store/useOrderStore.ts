@@ -33,6 +33,8 @@ export interface CreateOrderInput {
   }>;
   ticketDiscount?: { type: 'pct' | 'abs'; value: number };
   source?: 'pos' | 'web' | 'admin' | 'telegram';
+  /** Customer-entered promo code; server validates + applies atomically. */
+  promoCode?: string;
 }
 
 export interface CreateOrderResult {
@@ -100,6 +102,7 @@ export const useOrderStore = create<StoreState>((set, get) => ({
           paymentBreakdown: input.paymentBreakdown,
           ticketDiscount: input.ticketDiscount,
           source: input.source,
+          promoCode: input.promoCode,
         }),
       });
 

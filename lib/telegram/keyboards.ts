@@ -60,24 +60,40 @@ export function productListKeyboard(
   return inline(rows);
 }
 
-// ── Product detail ──
+// ── Product detail (with bulk-quantity buttons for wholesale buyers) ──
 export function productDetailKeyboard(productId: string, inStock: boolean): InlineKeyboardMarkup {
   const rows: InlineKeyboardButton[][] = [];
   if (inStock) {
-    rows.push([btn('🛒 Savatchaga qo\'shish', `cart_add:${productId}:1`)]);
+    rows.push([btn("🛒 Savatchaga qo'shish (+1)", `cart_add:${productId}:1`)]);
+    // Bulk qty for wholesale — without these, ordering 50 dona requires
+    // 50 separate ➕ taps on the cart row.
+    rows.push([
+      btn('+5', `cart_add:${productId}:5`),
+      btn('+10', `cart_add:${productId}:10`),
+      btn('+50', `cart_add:${productId}:50`),
+    ]);
   }
   rows.push([btn('🔙 Ortga', 'back:categories')]);
   return inline(rows);
 }
 
-// ── Cart ──
+// ── Cart (with bulk +/- buttons for wholesale buyers) ──
 export function cartKeyboard(items: { productId: string; title: string; quantity: number }[]): InlineKeyboardMarkup {
-  const rows: InlineKeyboardButton[][] = items.map((item) => [
-    btn('➖', `cart_qty:${item.productId}:-1`),
-    btn(`${item.title} (${item.quantity})`, 'noop'),
-    btn('➕', `cart_qty:${item.productId}:1`),
-    btn('🗑', `cart_remove:${item.productId}`),
-  ]);
+  const rows: InlineKeyboardButton[][] = [];
+  for (const item of items) {
+    // Title + quantity display row + remove
+    rows.push([
+      btn(`${item.title} (${item.quantity})`, 'noop'),
+      btn('🗑', `cart_remove:${item.productId}`),
+    ]);
+    // ±1 row + ±5 / ±10 — covers retail-tap and wholesale-bulk in one cart UI
+    rows.push([
+      btn('−10', `cart_qty:${item.productId}:-10`),
+      btn('−1', `cart_qty:${item.productId}:-1`),
+      btn('+1', `cart_qty:${item.productId}:1`),
+      btn('+10', `cart_qty:${item.productId}:10`),
+    ]);
+  }
 
   rows.push([
     btn('✅ Buyurtma berish', 'order_confirm'),

@@ -89,6 +89,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Telegram pending referrals — server-only stash for /start ref payloads
+    // before customer shares phone. Admin SDK creates + cleans up.
+    match /telegramPendingRefs/{chatId} {
+      allow read, write: if false;
+    }
+
     // Promo codes — admin manages from /admin/promo, server applies at order
     // commit. Clients shouldn't write (would let users mint codes for self).
     match /promoCodes/{codeId} {

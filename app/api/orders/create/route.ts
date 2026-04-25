@@ -52,6 +52,11 @@ interface RequestBody {
   paymentBreakdown?: PaymentEntryInput[];
   ticketDiscount?: TicketDiscountInput;
   source?: 'pos' | 'web' | 'admin' | 'telegram';
+  // Promo / discount code — validated + applied atomically inside the
+  // same Firestore transaction that decrements stock. usedBy[uid] and
+  // totalUsed counters increment in the same write so we never overshoot
+  // maxUsesTotal or maxUsesPerUser under concurrent redemptions.
+  promoCode?: string;
 }
 
 interface OrderBasketItem {
@@ -100,7 +105,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
     }
 
-    const { items, clientName, clientPhone, deliveryAddress, orderNote, paymentMethod, targetUserUid, paymentBreakdown, ticketDiscount, source } = body;
+    const { items, clientName, clientPhone, deliveryAddress, orderNote, paymentMethod, targetUserUid, paymentBreakdown, ticketDiscount, source, promoCode } = body;
+    const promoCodeNormalized = typeof promoCode === 'string' ? promoCode.trim().toUpperCase() : '';
 
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'items required' }, { status: 400 });
@@ -172,6 +178,19 @@ export async function POST(req: NextRequest) {
         ? source
         : 'web';
 
+    // ── Pre-resolve the promo code doc id (transactions can't run queries) ──
+    let promoCodeRefId: string | null = null;
+    if (promoCodeNormalized) {
+      const snap = await db.collection('promoCodes')
+        .where('code', '==', promoCodeNormalized)
+        .limit(1)
+        .get();
+      if (snap.empty) {
+        return NextResponse.json({ error: 'Promo kod topilmadi' }, { status: 400 });
+      }
+      promoCodeRefId = snap.docs[0].id;
+    }
+
     // Normalize and dedupe items (sum quantities for same productId)
     const merged = new Map<string, number>();
     for (const it of items) {
@@ -217,6 +236,10 @@ export async function POST(req: NextRequest) {
         // READS FIRST (Firestore transaction requirement)
         const productRefs = normalizedItems.map((i) => db.collection('products').doc(i.productId));
         const productSnaps = await Promise.all(productRefs.map((r) => tx.get(r)));
+        // Read promo code doc inside the transaction so cap checks
+        // (totalUsed, usedBy[uid]) are atomic with the redemption write.
+        const promoRef = promoCodeRefId ? db.collection('promoCodes').doc(promoCodeRefId) : null;
+        const promoSnap = promoRef ? await tx.get(promoRef) : null;
 
         const stockErrors: Array<{ productId: string; title?: string; available: number; requested: number }> = [];
         const basketItems: OrderBasketItem[] = [];
@@ -274,13 +297,72 @@ export async function POST(req: NextRequest) {
           throw err;
         }
 
-        // ── Compute net total after ticket discount ──
-        let discountAmount = 0;
-        if (validatedDiscount) {
-          discountAmount = validatedDiscount.type === 'pct'
-            ? Math.round(totalPrice * (validatedDiscount.value / 100))
-            : Math.min(Math.round(validatedDiscount.value), totalPrice);
+        // ── Validate + apply promo code ──
+        let promoDiscountAmount = 0;
+        let promoCodeForOrder: string | undefined;
+        if (promoSnap && promoRef) {
+          if (!promoSnap.exists) {
+            const err = new Error('Promo kod topilmadi');
+            (err as Error & { promoError?: string }).promoError = 'not_found';
+            throw err;
+          }
+          const promoData = promoSnap.data() ?? {};
+          if (!promoData.active) {
+            const err = new Error('Bu promo kod faol emas');
+            (err as Error & { promoError?: string }).promoError = 'inactive';
+            throw err;
+          }
+          const exp = promoData.expiresAt;
+          // expiresAt is a Firestore Timestamp; toMillis() may not exist on plain objects
+          const expMs = exp && typeof (exp as { toMillis?: () => number }).toMillis === 'function'
+            ? (exp as { toMillis: () => number }).toMillis()
+            : exp instanceof Date ? exp.getTime() : 0;
+          if (expMs && expMs < Date.now()) {
+            const err = new Error('Promo kod muddati tugagan');
+            (err as Error & { promoError?: string }).promoError = 'expired';
+            throw err;
+          }
+          const minOrder = Number(promoData.minOrderTotal) || 0;
+          if (totalPrice < minOrder) {
+            const err = new Error(`Buyurtma kamida ${minOrder} soʻm boʻlishi kerak`);
+            (err as Error & { promoError?: string }).promoError = 'min_order';
+            throw err;
+          }
+          const totalUsed = Number(promoData.totalUsed) || 0;
+          const maxTotal = Number(promoData.maxUsesTotal) || 0;
+          if (maxTotal > 0 && totalUsed >= maxTotal) {
+            const err = new Error('Promo kod limiti tugagan');
+            (err as Error & { promoError?: string }).promoError = 'sold_out';
+            throw err;
+          }
+          const usedBy = (promoData.usedBy ?? {}) as Record<string, number>;
+          const userUsed = Number(usedBy[orderUserUid]) || 0;
+          const maxPerUser = Number(promoData.maxUsesPerUser) || 1;
+          if (userUsed >= maxPerUser) {
+            const err = new Error('Siz bu promo koddan allaqachon foydalangansiz');
+            (err as Error & { promoError?: string }).promoError = 'already_used';
+            throw err;
+          }
+          const ptype = promoData.type === 'abs' ? 'abs' : 'pct';
+          const pval = Math.max(0, Number(promoData.value) || 0);
+          promoDiscountAmount = ptype === 'pct'
+            ? Math.round(totalPrice * (Math.min(100, pval) / 100))
+            : Math.min(Math.round(pval), totalPrice);
+          promoCodeForOrder = String(promoData.code || promoCodeNormalized);
         }
+
+        // ── Compute net total after BOTH discounts ──
+        // Promo applies first (customer earned), then ticket discount on the
+        // remainder. We DO NOT apply ticketDiscount on the original gross
+        // separately — that would over-discount when both are present.
+        const afterPromo = totalPrice - promoDiscountAmount;
+        let ticketDiscountAmount = 0;
+        if (validatedDiscount) {
+          ticketDiscountAmount = validatedDiscount.type === 'pct'
+            ? Math.round(afterPromo * (validatedDiscount.value / 100))
+            : Math.min(Math.round(validatedDiscount.value), afterPromo);
+        }
+        const discountAmount = promoDiscountAmount + ticketDiscountAmount;
         const netTotal = totalPrice - discountAmount;
 
         // ── Validate payment breakdown sum (POS) ──
@@ -336,7 +418,16 @@ export async function POST(req: NextRequest) {
           ...(resolvedPaymentMethod ? { paymentMethod: resolvedPaymentMethod } : {}),
           ...(breakdownForOrder ? { paymentBreakdown: breakdownForOrder } : {}),
           ...(validatedDiscount ? { ticketDiscount: validatedDiscount, discountAmount, netTotal } : {}),
+          ...(promoCodeForOrder ? { promoCode: promoCodeForOrder, promoDiscountAmount } : {}),
         });
+
+        // ── Atomically increment promo redemption counters ──
+        if (promoRef) {
+          tx.update(promoRef, {
+            [`usedBy.${orderUserUid}`]: ((promoSnap?.data()?.usedBy ?? {})[orderUserUid] ?? 0) + 1,
+            totalUsed: (Number(promoSnap?.data()?.totalUsed) || 0) + 1,
+          });
+        }
 
         // ── Write nasiya ledger entries for credit portions ──
         if (validatedBreakdown) {
@@ -383,6 +474,13 @@ export async function POST(req: NextRequest) {
       if (paymentMismatch) {
         return NextResponse.json(
           { error: 'Toʻlov yigʻindisi summa bilan mos kelmadi', paymentMismatch },
+          { status: 400 },
+        );
+      }
+      const promoError = (err as Error & { promoError?: string }).promoError;
+      if (promoError) {
+        return NextResponse.json(
+          { error: (err as Error).message || 'Promo kod xatosi', promoError },
           { status: 400 },
         );
       }

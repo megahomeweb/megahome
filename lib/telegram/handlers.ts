@@ -31,8 +31,13 @@ async function handleCommand(message: TelegramMessage): Promise<void> {
   const command = text.split(' ')[0].toLowerCase().replace(/@\w+$/, ''); // strip bot username
 
   switch (command) {
-    case '/start':
-      return handleStart(chatId, message.from);
+    case '/start': {
+      // Telegram supports start payload via `t.me/yourbot?start=<payload>` —
+      // we use it for referral deeplinks (`ref_<uid>`) and any future
+      // campaign codes.
+      const payload = text.split(' ').slice(1).join(' ').trim() || undefined;
+      return handleStart(chatId, message.from, payload);
+    }
     case '/products':
     case '/mahsulotlar':
       return handleProducts(chatId);

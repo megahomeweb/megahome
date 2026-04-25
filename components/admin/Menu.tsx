@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import React from 'react'
 import { BiUser } from 'react-icons/bi'
-import { LayoutDashboard, ShoppingCart, PackagePlus, BarChart3, Crown, FileText, Warehouse, MessageCircle, Receipt, Tag } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, PackagePlus, BarChart3, Crown, FileText, Warehouse, MessageCircle, Receipt, Tag, Percent } from 'lucide-react';
 import { useNotificationStore } from '@/store/useNotificationStore'
 import { useAuthStore } from '@/store/authStore'
 
@@ -118,6 +118,14 @@ const Menu = () => {
         <Link href={'/admin/customers'} className={`flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-link-hover ${isActive('/admin/customers') ? 'bg-brand-gray-100' : ''}`}>
           <Crown size={24} />
           <p className="text-black text-sm font-medium leading-normal">Mijozlar reytingi</p>
+        </Link>
+      )}
+
+      {/* Admin only: Promo codes */}
+      {admin && (
+        <Link href={'/admin/promo'} className={`flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-link-hover ${isActive('/admin/promo') ? 'bg-brand-gray-100' : ''}`}>
+          <Percent size={24} />
+          <p className="text-black text-sm font-medium leading-normal">Promo kodlar</p>
         </Link>
       )}
 

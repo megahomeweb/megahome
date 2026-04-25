@@ -73,6 +73,34 @@ export interface Order {
   netTotal?: number; // totalPrice - ticketDiscount; equals sum(paymentBreakdown.amount)
 }
 
+// Promo / discount code — admins create from /admin/promo, customers redeem
+// by passing `promoCode` to /api/orders/create. Validation + apply happens
+// atomically inside the same Firestore transaction that creates the order
+// and decrements stock — no race possible.
+export interface PromoCode {
+  id: string;
+  /** Customer-typed code, stored UPPERCASE for case-insensitive lookup. */
+  code: string;
+  type: 'pct' | 'abs';
+  /** pct: 1-100 (% off). abs: UZS amount off. */
+  value: number;
+  /** Minimum order total (gross UZS) required to apply. 0 = no min. */
+  minOrderTotal: number;
+  /** Total redemptions cap across all users. 0 = unlimited. */
+  maxUsesTotal: number;
+  /** Per-user redemption cap. Typically 1 to prevent share-and-save abuse. */
+  maxUsesPerUser: number;
+  /** Per-uid redemption count. Server-maintained. */
+  usedBy: { [uid: string]: number };
+  /** Server-maintained total redemption count. */
+  totalUsed: number;
+  active: boolean;
+  expiresAt: Timestamp | null;
+  createdAt: Timestamp;
+  /** Admin-only internal note (campaign source, channel, etc.) */
+  notes?: string;
+}
+
 // Nasiya (customer credit) ledger entry — created server-side when a POS sale
 // includes a credit portion. One entry per credit portion of one order.
 export interface NasiyaEntry {
