@@ -124,19 +124,18 @@ const SubmitModal = ({ setOpen }: props) => {
           body: JSON.stringify({ orderId: result.orderId }),
         }).catch(() => {});
       }
-      telegramNotify('order_placed', {
-        orderId: result.orderId,
-        clientName: data.firstName,
-        clientPhone: data.phoneNumber,
-        totalPrice: result.totalPrice,
-        totalQuantity: result.totalQuantity,
-        userUid: userData?.uid || '',
-        basketItems: result.basketItems.map((i) => ({ title: i.title, quantity: i.quantity })),
-      });
+      // Server-side lookup: notify route now reads order from Firestore
+      // and verifies caller, so we only need to pass orderId.
+      telegramNotify('order_placed', { orderId: result.orderId });
 
       clearBasket();
-      toast.success("Buyurtma muvaffaqiyatli qo'shildi");
-      navigate.push("/");
+      // Show the order ID so the customer knows what to reference if they
+      // need to call support, and route to history so they can SEE their
+      // order — previous flow dumped them on the home page with no proof
+      // anything had happened.
+      const shortId = result.orderId.slice(0, 8).toUpperCase();
+      toast.success(`✅ Buyurtma qabul qilindi · № ${shortId}`, { duration: 6000 });
+      navigate.push('/history-order');
     } catch (error) {
       console.error(error);
       toast.error("Buyurtma qo'shilmadi");

@@ -26,13 +26,20 @@ const useCartProductStore = create<BasketState>()(
       totalPrice: 0,
       
       addToBasket: (product) => {
+        // SUM into existing line, don't replace.
+        // Old behaviour: if cart had qty=3 and user added 2, the line was
+        // OVERWRITTEN to qty=2 (silent loss of 3 units the user thought
+        // they had). Now we sum: existing 3 + new 2 → 5. Standard cart
+        // semantics; matches every other e-commerce expectation.
         set((state) => {
           const existingItem = state.cartProducts.find((item) => item.id === product.id);
-          
+
           if (existingItem) {
             return {
               cartProducts: state.cartProducts.map((item) =>
-                item.id === product.id ? { ...item, quantity: product.quantity } : item
+                item.id === product.id
+                  ? { ...item, quantity: item.quantity + product.quantity }
+                  : item,
               ),
             };
           } else {
@@ -79,8 +86,12 @@ const useCartProductStore = create<BasketState>()(
       },
 
       clearBasket: () => {
+        // SSR-safe + persist-aware. Old code unconditionally hit
+        // localStorage which throws during SSR and fights the persist
+        // middleware key (the persist storage key is private). Setting
+        // state to empty values triggers persist to write the empty
+        // state on its own; no manual localStorage call needed.
         set({ cartProducts: [], totalQuantity: 0, totalPrice: 0 });
-        localStorage.removeItem("basket-storage");
       },
     }),
     {

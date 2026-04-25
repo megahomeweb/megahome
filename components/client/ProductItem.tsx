@@ -1,3 +1,4 @@
+
 "use client";
 import useProductStore from "@/store/useProductStore";
 import React, { useEffect, useState } from "react";
@@ -22,12 +23,17 @@ const ProductItem = ({ id }: { id: string }) => {
   const navigate = useRouter();
   const quantityInBasket = getItemQuantity(id);
 
+  // Fetch the product when `id` changes. We deliberately do NOT depend on
+  // `quantityInBasket` — the previous version did, which meant every
+  // basket change kicked the qty input back to whatever was in the
+  // basket, overwriting whatever the user just typed. Quantity is purely
+  // user-controlled local state from here.
   useEffect(() => {
     if (id) {
       fetchSingleProduct(id as string);
-      setQuantity(quantityInBasket || 1);
     }
-  }, [fetchSingleProduct, id, quantityInBasket]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   if (loading || !product) {
     return (
@@ -56,10 +62,18 @@ const ProductItem = ({ id }: { id: string }) => {
     if (hasStock && quantity > stock) {
       return toast.error(`Omborda faqat ${stock} ta mavjud`);
     }
-    addToBasket({...product, quantity: quantity});
+    // Validate against existing in-cart total too — the cart store now
+    // SUMS, so adding here pushes total past stock.
+    if (hasStock && (quantityInBasket + quantity) > stock) {
+      return toast.error(`Savatchada ${quantityInBasket} ta mavjud · Omborda faqat ${stock} ta`);
+    }
+    addToBasket({ ...product, quantity });
     calculateTotals();
     toast.success("Mahsulot savatga qo'shildi!");
-    navigate.back();
+    // Push to cart instead of navigate.back() — back() exits the site
+    // when the user landed via a deeplink (no navigation history),
+    // and even when there IS history the user expects to see their cart.
+    navigate.push("/cart-product");
   };
 
   const handlePrev = () => {
