@@ -83,6 +83,19 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Telegram webhook idempotency dedup — pure server-side via Admin SDK.
+    // No client should ever read/write this collection.
+    match /processedUpdates/{updateId} {
+      allow read, write: if false;
+    }
+
+    // Promo codes — admin manages from /admin/promo, server applies at order
+    // commit. Clients shouldn't write (would let users mint codes for self).
+    match /promoCodes/{codeId} {
+      allow read: if isAuth();
+      allow create, update, delete: if isAdmin();
+    }
+
     // Telegram users — admin read/write, users can read own
     match /telegramUsers/{telegramUserId} {
       allow read: if isAdmin() || (isAuth() && resource.data.userUid == request.auth.uid);

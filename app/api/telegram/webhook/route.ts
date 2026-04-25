@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { timingSafeEqual } from 'node:crypto';
 import { handleUpdate } from '@/lib/telegram/handlers';
+import { claimUpdateId } from '@/lib/telegram/admin-app';
 import type { TelegramUpdate } from '@/lib/telegram/types';
 
 /** Constant-time string comparison to avoid leaking the expected secret
@@ -22,6 +23,19 @@ export async function POST(req: NextRequest) {
 
   try {
     const update: TelegramUpdate = await req.json();
+
+    // ── Idempotency ────────────────────────────────────────────
+    // Telegram retries any non-2xx, and a Vercel container kill mid-handler
+    // would otherwise re-trigger order creation, charging the customer twice
+    // on a 5M UZS wholesale ticket. claimUpdateId atomically reserves this
+    // update_id (Admin SDK `create()` throws on duplicate) — first claim wins,
+    // every subsequent retry is acknowledged with 200 but skipped.
+    if (typeof update?.update_id === 'number') {
+      const fresh = await claimUpdateId(update.update_id);
+      if (!fresh) {
+        return NextResponse.json({ ok: true, dedup: true });
+      }
+    }
 
     // Await the handler so Vercel's serverless runtime does not tear down
     // the container mid-execution. Prior code used fire-and-forget with

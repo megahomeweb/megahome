@@ -47,8 +47,10 @@ export function formatHelp(): string {
     '/help — Yordam',
     '',
     '📞 <b>Aloqa:</b>',
-    'Telefon: +998 (XX) XXX-XX-XX',
-    'Sayt: megahome.app',
+    process.env.TELEGRAM_SUPPORT_PHONE
+      ? `Telefon: ${process.env.TELEGRAM_SUPPORT_PHONE}`
+      : 'Telefon: @megahome_admin',
+    'Sayt: https://www.megahome.app',
   ].join('\n');
 }
 

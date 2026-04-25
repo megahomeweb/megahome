@@ -26,12 +26,29 @@ export async function getCart(chatId: number): Promise<CartItem[]> {
   return (snap.exists ? (snap.data()?.items as CartItem[] | undefined) : undefined) ?? [];
 }
 
-async function setCart(chatId: number, items: CartItem[]): Promise<void> {
-  if (items.length === 0) {
-    await cartRef(chatId).delete().catch(() => {});
-    return;
-  }
-  await cartRef(chatId).set({ items, updatedAt: new Date() });
+/**
+ * Atomic cart mutation. Wraps a read-modify-write in a Firestore transaction
+ * so concurrent ➕/➖ taps don't lose increments. Without this, a user
+ * double-tapping the +1 button would race the first round-trip — the second
+ * read sees the pre-first-write state and one increment is lost on commit.
+ */
+async function mutateCart(
+  chatId: number,
+  mutate: (items: CartItem[]) => CartItem[] | Promise<CartItem[]>,
+): Promise<CartItem[]> {
+  const db = getDb();
+  const ref = cartRef(chatId);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const items = (snap.exists ? (snap.data()?.items as CartItem[] | undefined) : undefined) ?? [];
+    const next = await Promise.resolve(mutate(items));
+    if (next.length === 0) {
+      tx.delete(ref);
+    } else {
+      tx.set(ref, { items: next, updatedAt: new Date() });
+    }
+    return next;
+  });
 }
 
 export async function handleCart(chatId: number, preloadedItems?: CartItem[]): Promise<void> {
@@ -58,70 +75,90 @@ export async function handleAddToCart(chatId: number, productId: string, quantit
   }
 
   const data = doc.data()!;
-  const stock = data.stock ?? 0;
+  const stock = (data.stock ?? 0) as number;
   if (stock <= 0) {
     await telegram.sendMessage(chatId, '🔴 Bu mahsulot tugagan.');
     return;
   }
 
-  const items = await getCart(chatId);
-  const existing = items.find((i) => i.productId === productId);
-
-  if (existing) {
-    const newQty = existing.quantity + quantity;
-    if (newQty > stock) {
-      await telegram.sendMessage(chatId, `⚠️ Stokda faqat ${stock} ta mavjud.`);
-      return;
+  let exceeded: number | null = null;
+  await mutateCart(chatId, (items) => {
+    const existing = items.find((i) => i.productId === productId);
+    if (existing) {
+      const newQty = existing.quantity + quantity;
+      if (newQty > stock) {
+        exceeded = stock;
+        return items; // unchanged
+      }
+      return items.map((i) =>
+        i.productId === productId ? { ...i, quantity: newQty } : i,
+      );
     }
-    existing.quantity = newQty;
-  } else {
     if (quantity > stock) {
-      await telegram.sendMessage(chatId, `⚠️ Stokda faqat ${stock} ta mavjud.`);
-      return;
+      exceeded = stock;
+      return items;
     }
-    items.push({
-      productId,
-      title: data.title || '',
-      price: Number(data.price) || 0,
-      quantity,
-    });
+    return [
+      ...items,
+      {
+        productId,
+        title: data.title || '',
+        price: Number(data.price) || 0,
+        quantity,
+      },
+    ];
+  });
+
+  if (exceeded !== null) {
+    await telegram.sendMessage(chatId, `⚠️ Stokda faqat ${exceeded} ta mavjud.`);
+    return;
   }
 
-  await setCart(chatId, items);
   await telegram.sendMessage(
     chatId,
     `✅ <b>${data.title}</b> savatchaga qo'shildi!\n\n🛒 /cart — Savatchani ko'rish`,
   );
 }
 
-export async function handleRemoveFromCart(chatId: number, productId: string, currentItems?: CartItem[]): Promise<void> {
-  const items = (currentItems ?? (await getCart(chatId))).filter((i) => i.productId !== productId);
-  await setCart(chatId, items);
+export async function handleRemoveFromCart(chatId: number, productId: string, _currentItems?: CartItem[]): Promise<void> {
+  // _currentItems param kept for API compat but transaction always re-reads
+  // for correctness under concurrent writes.
+  void _currentItems;
+  const items = await mutateCart(chatId, (curr) => curr.filter((i) => i.productId !== productId));
   await handleCart(chatId, items);
 }
 
 export async function handleUpdateCartQty(chatId: number, productId: string, delta: number): Promise<void> {
-  const items = await getCart(chatId);
-  const item = items.find((i) => i.productId === productId);
-  if (!item) return;
-
-  const newQty = item.quantity + delta;
-  if (newQty <= 0) {
-    return handleRemoveFromCart(chatId, productId, items);
-  }
-
   const db = getDb();
-  const doc = await db.collection('products').doc(productId).get();
-  const stock = doc.exists ? (doc.data()?.stock ?? 0) : 0;
+  // Read live stock outside the transaction — products collection isn't part
+  // of the cart-doc transaction boundary, just a constraint check.
+  const productDoc = await db.collection('products').doc(productId).get();
+  const stock = productDoc.exists ? ((productDoc.data()?.stock ?? 0) as number) : 0;
 
-  if (newQty > stock) {
-    await telegram.sendMessage(chatId, `⚠️ Stokda faqat ${stock} ta mavjud.`);
+  let exceeded: number | null = null;
+  let removed = false;
+
+  const next = await mutateCart(chatId, (items) => {
+    const item = items.find((i) => i.productId === productId);
+    if (!item) return items;
+    const newQty = item.quantity + delta;
+    if (newQty <= 0) {
+      removed = true;
+      return items.filter((i) => i.productId !== productId);
+    }
+    if (newQty > stock) {
+      exceeded = stock;
+      return items;
+    }
+    return items.map((i) => (i.productId === productId ? { ...i, quantity: newQty } : i));
+  });
+
+  if (exceeded !== null) {
+    await telegram.sendMessage(chatId, `⚠️ Stokda faqat ${exceeded} ta mavjud.`);
     return;
   }
-
-  item.quantity = newQty;
-  await setCart(chatId, items);
-  await handleCart(chatId, items);
+  void removed;
+  await handleCart(chatId, next);
 }
 
 export async function handleClearCart(chatId: number): Promise<void> {

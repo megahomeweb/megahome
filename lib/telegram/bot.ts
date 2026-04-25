@@ -1,10 +1,28 @@
 // Lightweight Telegram Bot API client — no external dependencies
 import type { SendMessageParams, SendPhotoParams, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove } from './types';
+import { pruneBlockedTelegramUser } from './admin-app';
 
 const BOT_TOKEN = () => process.env.TELEGRAM_BOT_TOKEN || '';
 const API_BASE = () => `https://api.telegram.org/bot${BOT_TOKEN()}`;
 
-async function apiCall(method: string, body: Record<string, unknown>) {
+/**
+ * Telegram returns these error codes when a user has blocked the bot or the
+ * chat is otherwise unreachable. We use them to prune dead chatIds from
+ * `telegramUsers` so broadcasts don't keep burning quota on them.
+ */
+const BLOCKED_ERROR_CODES = new Set([403]);
+const BLOCKED_ERROR_DESCRIPTIONS = [
+  'bot was blocked',
+  'user is deactivated',
+  'chat not found',
+  'PEER_ID_INVALID',
+];
+
+async function apiCall(
+  method: string,
+  body: Record<string, unknown>,
+  opts: { chatIdForPrune?: number | string } = {},
+) {
   const res = await fetch(`${API_BASE()}/${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -12,7 +30,18 @@ async function apiCall(method: string, body: Record<string, unknown>) {
   });
   const data = await res.json();
   if (!data.ok) {
-    console.error(`Telegram API error [${method}]:`, data.description);
+    console.error(`Telegram API error [${method}]:`, data.error_code, data.description);
+    // Auto-prune dead chats so broadcasts don't keep paying for them.
+    if (opts.chatIdForPrune) {
+      const desc = String(data.description ?? '').toLowerCase();
+      const isBlocked =
+        BLOCKED_ERROR_CODES.has(data.error_code) ||
+        BLOCKED_ERROR_DESCRIPTIONS.some((s) => desc.includes(s.toLowerCase()));
+      if (isBlocked) {
+        // fire-and-forget — pruning is opportunistic
+        void pruneBlockedTelegramUser(opts.chatIdForPrune);
+      }
+    }
   }
   return data;
 }
@@ -34,7 +63,7 @@ export const telegram = {
       reply_markup: options?.replyMarkup,
       disable_web_page_preview: options?.disablePreview ?? true,
     };
-    return apiCall('sendMessage', params as unknown as Record<string, unknown>);
+    return apiCall('sendMessage', params as unknown as Record<string, unknown>, { chatIdForPrune: chatId });
   },
 
   async sendPhoto(
@@ -50,7 +79,7 @@ export const telegram = {
       parse_mode: 'HTML',
       reply_markup: replyMarkup,
     };
-    return apiCall('sendPhoto', params as unknown as Record<string, unknown>);
+    return apiCall('sendPhoto', params as unknown as Record<string, unknown>, { chatIdForPrune: chatId });
   },
 
   async answerCallbackQuery(callbackQueryId: string, text?: string) {
