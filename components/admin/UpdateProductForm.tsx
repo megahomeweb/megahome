@@ -41,7 +41,7 @@ const UpdateProductForm = ({ id }: { id: string }) => {
     date: product?.date || emptyTimestamp,
     storageFileId: '',
     subcategory: '',
-    stock: 0
+    stock: 1
   });
 
   useEffect(() => {
@@ -64,7 +64,7 @@ const UpdateProductForm = ({ id }: { id: string }) => {
         date: product.date,
         storageFileId: product.storageFileId,
         subcategory: product.subcategory || '',
-        stock: product.stock ?? 0,
+        stock: product.stock ?? 1,
         costPrice: product.costPrice ?? 0
       });
       const cat = categories.find(c => c.name === product.category);

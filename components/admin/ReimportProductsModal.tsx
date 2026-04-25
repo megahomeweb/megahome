@@ -137,11 +137,12 @@ const ReimportProductsModal = ({ onClose }: ReimportProductsModalProps) => {
             }
           }
 
-          // Compare stock
-          if (stockCol && row[stockCol] !== undefined) {
+          // Compare stock — blank cells mean "no change", not "set to 0"
+          if (stockCol && row[stockCol] !== undefined && row[stockCol] !== '') {
             const newStock = Number(row[stockCol]);
-            if (!isNaN(newStock) && newStock !== (product.stock || 0)) {
-              changes.push({ field: 'Ombor', oldVal: String(product.stock || 0), newVal: String(newStock) });
+            const currentStock = product.stock ?? 1;
+            if (!isNaN(newStock) && newStock >= 0 && newStock !== currentStock) {
+              changes.push({ field: 'Ombor', oldVal: String(currentStock), newVal: String(newStock) });
               updateData.stock = newStock;
             }
           }

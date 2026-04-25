@@ -61,7 +61,7 @@ export function exportProductsToExcel(products: ProductT[], filename = 'mahsulot
       "Tan narxi (so'm)": costPrice,
       "Foyda (so'm)": profit,
       'Marja %': margin,
-      'Ombor': p.stock ?? 'Belgilanmagan',
+      'Ombor': p.stock ?? 1,
     };
   });
 

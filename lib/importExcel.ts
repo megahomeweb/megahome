@@ -137,7 +137,8 @@ export function parseProductsFromFile(file: File, categories: CategoryI[]): Prom
           const rawSubcategory = get(row, 'subcategory');
           const price = get(row, 'price') || '0';
           const costPrice = Number(get(row, 'costPrice') || 0);
-          const stock = Number(get(row, 'stock') || 0);
+          const rawStock = get(row, 'stock');
+          const stock = rawStock === '' ? 1 : Number(rawStock);
           const description = get(row, 'description');
 
           // Resolve to the canonical category name (stored in Firestore) so

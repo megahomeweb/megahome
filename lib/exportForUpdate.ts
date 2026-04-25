@@ -10,7 +10,7 @@ export function exportProductsForUpdate(products: ProductT[], filename = "mahsul
     "Subkategoriya": p.subcategory || "",
     "Sotish narxi": Number(p.price),
     "Tan narxi": p.costPrice || 0,
-    "Ombor soni": typeof p.stock === "number" ? p.stock : 0,
+    "Ombor soni": typeof p.stock === "number" ? p.stock : 1,
     "Tavsif": p.description || "",
   }));
 

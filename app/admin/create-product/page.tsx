@@ -35,7 +35,7 @@ const AddProduct = () => {
     category: "",
     description: "",
     quantity: 0,
-    stock: 0,
+    stock: 1,
     time: Timestamp.now(),
     date: new Date().toLocaleString("en-US", {
       month: "short",
@@ -186,7 +186,7 @@ const AddProduct = () => {
       category: "",
       description: "",
       quantity: 0,
-      stock: 0,
+      stock: 1,
       time: Timestamp.now(),
       date: new Date().toLocaleString("en-US", {
         month: "short",
