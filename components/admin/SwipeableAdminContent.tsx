@@ -27,9 +27,9 @@ import { ReactNode, useEffect, useRef, useState } from "react";
 // Single source of truth — must match the main-tab order in BottomNav.tsx
 const TAB_ORDER = [
   "/admin",
-  "/admin/products",
+  "/admin/sotuv",
   "/admin/orders",
-  "/admin/invoices",
+  "/admin/products",
 ] as const;
 
 const SWIPE_PX_THRESHOLD = 80;

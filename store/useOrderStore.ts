@@ -24,6 +24,15 @@ export interface CreateOrderInput {
   paymentMethod?: string;
   totalPriceHint?: number;
   targetUserUid?: string;
+  // POS additions
+  paymentBreakdown?: Array<{
+    method: 'naqd' | 'nasiya' | 'karta';
+    amount: number;
+    dueDate?: string; // ISO
+    note?: string;
+  }>;
+  ticketDiscount?: { type: 'pct' | 'abs'; value: number };
+  source?: 'pos' | 'web' | 'admin' | 'telegram';
 }
 
 export interface CreateOrderResult {
@@ -33,6 +42,7 @@ export interface CreateOrderResult {
   totalQuantity: number;
   basketItems: ProductT[];
   priceChanged: boolean;
+  nasiyaIds?: string[];
 }
 
 export interface CreateOrderError {
@@ -87,6 +97,9 @@ export const useOrderStore = create<StoreState>((set, get) => ({
           orderNote: input.orderNote,
           paymentMethod: input.paymentMethod,
           targetUserUid: input.targetUserUid,
+          paymentBreakdown: input.paymentBreakdown,
+          ticketDiscount: input.ticketDiscount,
+          source: input.source,
         }),
       });
 
@@ -106,6 +119,7 @@ export const useOrderStore = create<StoreState>((set, get) => ({
         totalQuantity: body.totalQuantity,
         basketItems: body.basketItems,
         priceChanged: !!body.priceChanged,
+        nasiyaIds: Array.isArray(body.nasiyaIds) ? body.nasiyaIds : undefined,
       };
     } catch (err) {
       console.error('createOrder error:', err);

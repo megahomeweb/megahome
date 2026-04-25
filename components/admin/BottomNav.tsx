@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { LayoutDashboard, ShoppingCart, Package, FileText, Menu, X, PackagePlus, Warehouse, BarChart3, Crown, Users, Settings } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, FileText, Menu, X, PackagePlus, Warehouse, BarChart3, Crown, Users, Settings, Receipt } from 'lucide-react';
 import { useNotificationStore } from '@/store/useNotificationStore';
 import { useAuthStore } from '@/store/authStore';
 
@@ -18,21 +18,22 @@ const BottomNav = () => {
   const isActive = (path: string) => pathname === path;
   const isActiveGroup = (paths: string[]) => paths.some((p) => pathname.startsWith(p));
 
-  // Main 4 tabs + "More" button
+  // Main 4 tabs + "More" button — POS is now the primary action
   const tabs = [
     { href: '/admin/', icon: LayoutDashboard, label: 'Bosh sahifa', active: isActive('/admin') },
-    { href: '/admin/products', icon: Package, label: 'Mahsulotlar', active: isActive('/admin/products') },
+    { href: '/admin/sotuv', icon: Receipt, label: 'Sotuv', active: isActive('/admin/sotuv'), accent: true as const },
     {
       href: '/admin/orders', icon: ShoppingCart, label: 'Buyurtmalar',
       active: isActive('/admin/orders'),
       badge: newOrderCount > 0 ? newOrderCount : null,
     },
-    { href: '/admin/invoices', icon: FileText, label: 'Faktura', active: isActive('/admin/invoices') },
+    { href: '/admin/products', icon: Package, label: 'Mahsulotlar', active: isActive('/admin/products') },
   ];
 
   // "More" menu items
   const moreItems = [
     ...(admin ? [{ href: '/admin/users', icon: Users, label: 'Foydalanuvchilar' }] : []),
+    { href: '/admin/invoices', icon: FileText, label: 'Faktura' },
     { href: '/admin/kirim', icon: PackagePlus, label: 'Kirim' },
     { href: '/admin/ombor', icon: Warehouse, label: 'Ombor' },
     ...(admin ? [
@@ -85,23 +86,32 @@ const BottomNav = () => {
       {/* Bottom tab bar */}
       <nav className="fixed bottom-0 left-0 right-0 z-50 lg:hidden bg-white/95 backdrop-blur-lg border-t border-gray-200 print:hidden pb-[env(safe-area-inset-bottom)]">
         <div className="flex items-center justify-around h-14 px-2 max-w-lg mx-auto">
-          {tabs.map((tab) => (
-            <Link
-              key={tab.href}
-              href={tab.href}
-              className={`relative flex flex-col items-center justify-center gap-0.5 flex-1 py-1 rounded-xl transition-all ${
-                tab.active ? 'text-gray-900 bg-gray-100' : 'text-gray-400 active:bg-gray-50'
-              }`}
-            >
-              <tab.icon className={`size-5 ${tab.active ? 'stroke-[2.5]' : ''}`} />
-              <span className={`text-[10px] ${tab.active ? 'font-bold' : 'font-medium'}`}>{tab.label}</span>
-              {tab.badge && (
-                <span className="absolute top-0 right-1/2 -mr-4 flex items-center justify-center min-w-4 h-4 px-1 text-[9px] font-bold text-white bg-green-500 rounded-full animate-pulse">
-                  {tab.badge > 9 ? '9+' : tab.badge}
-                </span>
-              )}
-            </Link>
-          ))}
+          {tabs.map((tab) => {
+            const accent = 'accent' in tab && tab.accent;
+            return (
+              <Link
+                key={tab.href}
+                href={tab.href}
+                className={`relative flex flex-col items-center justify-center gap-0.5 flex-1 py-1 rounded-xl transition-all ${
+                  tab.active
+                    ? accent
+                      ? 'text-emerald-700 bg-emerald-50'
+                      : 'text-gray-900 bg-gray-100'
+                    : accent
+                    ? 'text-emerald-600 active:bg-emerald-50'
+                    : 'text-gray-400 active:bg-gray-50'
+                }`}
+              >
+                <tab.icon className={`size-5 ${tab.active ? 'stroke-[2.5]' : ''}`} />
+                <span className={`text-[10px] ${tab.active ? 'font-bold' : 'font-medium'}`}>{tab.label}</span>
+                {'badge' in tab && tab.badge && (
+                  <span className="absolute top-0 right-1/2 -mr-4 flex items-center justify-center min-w-4 h-4 px-1 text-[9px] font-bold text-white bg-green-500 rounded-full animate-pulse">
+                    {tab.badge > 9 ? '9+' : tab.badge}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
 
           {/* More button */}
           <button

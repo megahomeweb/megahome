@@ -34,6 +34,27 @@ export interface CategoryI {
 
 export type OrderStatus = 'yangi' | 'tasdiqlangan' | 'yigʻilmoqda' | 'yetkazilmoqda' | 'yetkazildi' | 'bekor_qilindi';
 
+// Single payment method on an order overall (summary).
+// 'aralash' = mixed (cash + credit). Detailed breakdown lives in `paymentBreakdown`.
+export type PaymentMethod = 'naqd' | 'nasiya' | 'aralash' | 'karta';
+
+// One entry in a payment breakdown. Total of entries == order net total.
+export interface PaymentEntry {
+  method: 'naqd' | 'nasiya' | 'karta';
+  amount: number;
+  dueDate?: Timestamp; // only meaningful for nasiya
+  note?: string;
+}
+
+// Where the order came from. POS sales should be reported separately.
+export type OrderSource = 'pos' | 'web' | 'admin' | 'telegram';
+
+// Order-level discount (header). Applied AFTER any per-line discounts.
+export interface TicketDiscount {
+  type: 'pct' | 'abs';
+  value: number;
+}
+
 export interface Order {
   id: string;
   clientName: string;
@@ -44,6 +65,30 @@ export interface Order {
   totalQuantity: number;
   userUid: string;
   status?: OrderStatus;
+  // POS / payment fields (optional — legacy orders predate them)
+  paymentMethod?: PaymentMethod | string;
+  paymentBreakdown?: PaymentEntry[];
+  source?: OrderSource;
+  ticketDiscount?: TicketDiscount;
+  netTotal?: number; // totalPrice - ticketDiscount; equals sum(paymentBreakdown.amount)
+}
+
+// Nasiya (customer credit) ledger entry — created server-side when a POS sale
+// includes a credit portion. One entry per credit portion of one order.
+export interface NasiyaEntry {
+  id: string;
+  customerUid: string;
+  customerName: string;
+  customerPhone: string;
+  orderId: string;
+  amount: number;        // credited at sale
+  paid: number;          // accumulated payments received
+  remaining: number;     // amount - paid (server-maintained)
+  dueDate?: Timestamp;
+  status: 'open' | 'partial' | 'paid';
+  createdAt: Timestamp;
+  closedAt?: Timestamp;
+  note?: string;
 }
 
 export interface StockReceiptItem {

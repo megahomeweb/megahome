@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import React from 'react'
 import { BiUser } from 'react-icons/bi'
-import { LayoutDashboard, ShoppingCart, PackagePlus, BarChart3, Crown, FileText, Warehouse, MessageCircle } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, PackagePlus, BarChart3, Crown, FileText, Warehouse, MessageCircle, Receipt } from 'lucide-react';
 import { useNotificationStore } from '@/store/useNotificationStore'
 import { useAuthStore } from '@/store/authStore'
 
@@ -24,6 +24,15 @@ const Menu = () => {
       <Link href={'/admin/'} className={`flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-link-hover ${isActive('/admin') ? 'bg-brand-gray-100' : ''}`}>
         <LayoutDashboard size={24} />
         <p className="text-black text-sm font-medium leading-normal">Bosh sahifa</p>
+      </Link>
+
+      {/* All staff: POS — Sotuv nuqtasi */}
+      <Link href={'/admin/sotuv'} className={`flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-link-hover ${isActive('/admin/sotuv') ? 'bg-brand-gray-100' : ''}`}>
+        <Receipt size={24} className="text-emerald-600" />
+        <p className="text-black text-sm font-medium leading-normal">Sotuv nuqtasi</p>
+        <span className="ml-auto text-[9px] font-bold uppercase tracking-wide bg-emerald-100 text-emerald-700 rounded-md px-1.5 py-0.5">
+          POS
+        </span>
       </Link>
 
       {/* Admin only: User management */}

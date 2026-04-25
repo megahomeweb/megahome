@@ -68,6 +68,16 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // Nasiya (customer credit) ledger — created server-side by /api/orders/create
+    // when a sale includes a credit portion. Admins can read all and update
+    // (mark paid). Customers can read their own entries by uid.
+    match /nasiya/{nasiyaId} {
+      allow read: if isAdmin() || (isAuth() && resource.data.customerUid == request.auth.uid);
+      allow create: if false; // server-only
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
     // Telegram users — admin read/write, users can read own
     match /telegramUsers/{telegramUserId} {
       allow read: if isAdmin() || (isAuth() && resource.data.userUid == request.auth.uid);

@@ -25,6 +25,19 @@ interface CartItemInput {
   quantity: number;
 }
 
+type PaymentEntryMethod = 'naqd' | 'nasiya' | 'karta';
+interface PaymentEntryInput {
+  method: PaymentEntryMethod;
+  amount: number;
+  dueDate?: string; // ISO date string (server converts to Timestamp)
+  note?: string;
+}
+
+interface TicketDiscountInput {
+  type: 'pct' | 'abs';
+  value: number;
+}
+
 interface RequestBody {
   items: CartItemInput[];
   clientName: string;
@@ -35,6 +48,10 @@ interface RequestBody {
   // When an admin places an order on behalf of a customer, the customer's uid
   // must be supplied here (caller must itself be admin — we verify below).
   targetUserUid?: string;
+  // POS additions
+  paymentBreakdown?: PaymentEntryInput[];
+  ticketDiscount?: TicketDiscountInput;
+  source?: 'pos' | 'web' | 'admin' | 'telegram';
 }
 
 interface OrderBasketItem {
@@ -83,7 +100,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
     }
 
-    const { items, clientName, clientPhone, deliveryAddress, orderNote, paymentMethod, targetUserUid } = body;
+    const { items, clientName, clientPhone, deliveryAddress, orderNote, paymentMethod, targetUserUid, paymentBreakdown, ticketDiscount, source } = body;
 
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'items required' }, { status: 400 });
@@ -97,6 +114,63 @@ export async function POST(req: NextRequest) {
     if (typeof clientPhone !== 'string' || clientPhone.trim().length < 4) {
       return NextResponse.json({ error: 'clientPhone required' }, { status: 400 });
     }
+
+    // ── Validate ticket discount and payment breakdown (POS) ──
+    let validatedDiscount: { type: 'pct' | 'abs'; value: number } | null = null;
+    if (ticketDiscount) {
+      const t = ticketDiscount.type;
+      const v = Number(ticketDiscount.value);
+      if (t !== 'pct' && t !== 'abs') {
+        return NextResponse.json({ error: 'Invalid ticketDiscount.type' }, { status: 400 });
+      }
+      if (!Number.isFinite(v) || v < 0) {
+        return NextResponse.json({ error: 'Invalid ticketDiscount.value' }, { status: 400 });
+      }
+      if (t === 'pct' && v > 100) {
+        return NextResponse.json({ error: 'Discount % cannot exceed 100' }, { status: 400 });
+      }
+      validatedDiscount = { type: t, value: v };
+    }
+
+    let validatedBreakdown: { method: PaymentEntryMethod; amount: number; dueDate?: Date; note?: string }[] | null = null;
+    if (paymentBreakdown !== undefined) {
+      if (!Array.isArray(paymentBreakdown) || paymentBreakdown.length === 0) {
+        return NextResponse.json({ error: 'paymentBreakdown must be a non-empty array' }, { status: 400 });
+      }
+      if (paymentBreakdown.length > 5) {
+        return NextResponse.json({ error: 'Too many payment entries' }, { status: 400 });
+      }
+      validatedBreakdown = [];
+      for (const e of paymentBreakdown) {
+        if (e.method !== 'naqd' && e.method !== 'nasiya' && e.method !== 'karta') {
+          return NextResponse.json({ error: `Invalid payment method "${e.method}"` }, { status: 400 });
+        }
+        const amt = Number(e.amount);
+        if (!Number.isFinite(amt) || amt <= 0) {
+          return NextResponse.json({ error: 'Invalid payment amount' }, { status: 400 });
+        }
+        const due = e.dueDate ? new Date(e.dueDate) : undefined;
+        if (due && Number.isNaN(due.getTime())) {
+          return NextResponse.json({ error: 'Invalid dueDate' }, { status: 400 });
+        }
+        // Nasiya requires a known customer (targetUserUid for admin placements;
+        // self-uid otherwise — we'll resolve orderUserUid below).
+        if (e.method === 'nasiya' && !targetUserUid && !callerIsAdmin) {
+          return NextResponse.json({ error: 'Nasiya requires customer identification' }, { status: 400 });
+        }
+        validatedBreakdown.push({
+          method: e.method,
+          amount: Math.round(amt),
+          ...(due ? { dueDate: due } : {}),
+          ...(e.note ? { note: String(e.note).slice(0, 200) } : {}),
+        });
+      }
+    }
+
+    const validatedSource: 'pos' | 'web' | 'admin' | 'telegram' =
+      source === 'pos' || source === 'web' || source === 'admin' || source === 'telegram'
+        ? source
+        : 'web';
 
     // Normalize and dedupe items (sum quantities for same productId)
     const merged = new Map<string, number>();
@@ -137,7 +211,7 @@ export async function POST(req: NextRequest) {
       }>;
     };
 
-    let txResult: TxResult;
+    let txResult: TxResult & { nasiyaIds: string[] };
     try {
       txResult = await db.runTransaction(async (tx) => {
         // READS FIRST (Firestore transaction requirement)
@@ -149,6 +223,7 @@ export async function POST(req: NextRequest) {
         const movements: TxResult['movements'] = [];
         let totalPrice = 0;
         let totalQuantity = 0;
+        const nasiyaIds: string[] = [];
 
         for (let i = 0; i < productSnaps.length; i++) {
           const snap = productSnaps[i];
@@ -199,27 +274,91 @@ export async function POST(req: NextRequest) {
           throw err;
         }
 
+        // ── Compute net total after ticket discount ──
+        let discountAmount = 0;
+        if (validatedDiscount) {
+          discountAmount = validatedDiscount.type === 'pct'
+            ? Math.round(totalPrice * (validatedDiscount.value / 100))
+            : Math.min(Math.round(validatedDiscount.value), totalPrice);
+        }
+        const netTotal = totalPrice - discountAmount;
+
+        // ── Validate payment breakdown sum (POS) ──
+        if (validatedBreakdown) {
+          const sum = validatedBreakdown.reduce((s, e) => s + e.amount, 0);
+          // Allow 1 UZS rounding tolerance
+          if (Math.abs(sum - netTotal) > 1) {
+            const err = new Error('Payment total mismatch');
+            (err as Error & { paymentMismatch?: { expected: number; got: number } }).paymentMismatch = {
+              expected: netTotal,
+              got: sum,
+            };
+            throw err;
+          }
+        }
+
         // WRITES
         for (let i = 0; i < productRefs.length; i++) {
-          const { quantity } = normalizedItems[i];
           tx.update(productRefs[i], { stock: movements[i].stockAfter });
         }
 
         const orderRef = db.collection('orders').doc();
+        const orderTimestamp = new Date();
+        const breakdownForOrder = validatedBreakdown
+          ? validatedBreakdown.map((e) => ({
+              method: e.method,
+              amount: e.amount,
+              ...(e.dueDate ? { dueDate: e.dueDate } : {}),
+              ...(e.note ? { note: e.note } : {}),
+            }))
+          : undefined;
+        // Resolve order-level paymentMethod summary from breakdown when not explicitly provided
+        let resolvedPaymentMethod: string | undefined = paymentMethod;
+        if (!resolvedPaymentMethod && validatedBreakdown && validatedBreakdown.length > 0) {
+          const methods = new Set(validatedBreakdown.map((e) => e.method));
+          if (methods.size > 1) resolvedPaymentMethod = 'aralash';
+          else resolvedPaymentMethod = validatedBreakdown[0].method;
+        }
+
         tx.set(orderRef, {
           clientName: clientName.trim(),
           clientPhone: clientPhone.trim(),
           userUid: orderUserUid,
-          date: new Date(),
+          date: orderTimestamp,
           status: 'yangi',
           basketItems,
           totalPrice,
           totalQuantity,
           stockReserved: true,
+          source: validatedSource,
           ...(deliveryAddress?.trim() ? { deliveryAddress: deliveryAddress.trim() } : {}),
           ...(orderNote?.trim() ? { orderNote: orderNote.trim() } : {}),
-          ...(paymentMethod ? { paymentMethod } : {}),
+          ...(resolvedPaymentMethod ? { paymentMethod: resolvedPaymentMethod } : {}),
+          ...(breakdownForOrder ? { paymentBreakdown: breakdownForOrder } : {}),
+          ...(validatedDiscount ? { ticketDiscount: validatedDiscount, discountAmount, netTotal } : {}),
         });
+
+        // ── Write nasiya ledger entries for credit portions ──
+        if (validatedBreakdown) {
+          for (const e of validatedBreakdown) {
+            if (e.method !== 'nasiya') continue;
+            const nasiyaRef = db.collection('nasiya').doc();
+            tx.set(nasiyaRef, {
+              customerUid: orderUserUid,
+              customerName: clientName.trim(),
+              customerPhone: clientPhone.trim(),
+              orderId: orderRef.id,
+              amount: e.amount,
+              paid: 0,
+              remaining: e.amount,
+              status: 'open',
+              createdAt: orderTimestamp,
+              ...(e.dueDate ? { dueDate: e.dueDate } : {}),
+              ...(e.note ? { note: e.note } : {}),
+            });
+            nasiyaIds.push(nasiyaRef.id);
+          }
+        }
 
         // Detect price drift so the UI can warn the customer
         const clientTotalHint = Number(req.headers.get('X-Client-Total-Hint'));
@@ -232,12 +371,20 @@ export async function POST(req: NextRequest) {
           basketItems,
           priceChanged,
           movements,
+          nasiyaIds,
         };
       });
     } catch (err) {
       const stockErrors = (err as Error & { stockErrors?: unknown }).stockErrors;
       if (stockErrors) {
         return NextResponse.json({ error: 'Ombordagi mahsulot yetarli emas', stockErrors }, { status: 409 });
+      }
+      const paymentMismatch = (err as Error & { paymentMismatch?: { expected: number; got: number } }).paymentMismatch;
+      if (paymentMismatch) {
+        return NextResponse.json(
+          { error: 'Toʻlov yigʻindisi summa bilan mos kelmadi', paymentMismatch },
+          { status: 400 },
+        );
       }
       console.error('Order create transaction failed:', err);
       return NextResponse.json({ error: 'Order creation failed' }, { status: 500 });
@@ -271,6 +418,7 @@ export async function POST(req: NextRequest) {
       totalQuantity: txResult.totalQuantity,
       basketItems: txResult.basketItems,
       priceChanged: txResult.priceChanged,
+      nasiyaIds: txResult.nasiyaIds,
     });
   } catch (err) {
     console.error('Order create route error:', err);

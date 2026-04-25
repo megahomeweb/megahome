@@ -25,7 +25,7 @@ export default function Home() {
   const productImages = useMemo(() =>
     products
       .filter(p => p.productImageUrl?.length > 0)
-      .map(p => ({ url: p.productImageUrl[0].url, title: p.title }))
+      .map(p => ({ url: p.productImageUrl[0].url, title: p.title, id: p.id }))
       .slice(0, 16),
     [products]
   );
@@ -109,8 +109,10 @@ export default function Home() {
           <div className="scroll-mask">
             <div className="animate-scroll-left flex gap-4 sm:gap-6 w-max">
               {[...productImages, ...productImages].map((img, i) => (
-                <div key={i}
-                  className="flex-shrink-0 w-40 h-40 sm:w-56 sm:h-56 lg:w-64 lg:h-64 rounded-2xl overflow-hidden group cursor-pointer"
+                <Link
+                  key={i}
+                  href={img.id ? `/product/${img.id}` : "/#category"}
+                  className="flex-shrink-0 w-40 h-40 sm:w-56 sm:h-56 lg:w-64 lg:h-64 rounded-2xl overflow-hidden group cursor-pointer relative"
                 >
                   <Image
                     src={img.url}
@@ -119,12 +121,18 @@ export default function Home() {
                     height={256}
                     className="size-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />
-                </div>
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-3">
+                    <p className="text-white text-xs sm:text-sm font-medium line-clamp-2">{img.title}</p>
+                  </div>
+                </Link>
               ))}
             </div>
           </div>
         </section>
       )}
+
+      {/* ═══════════════════ CATEGORIES (above the fold on mobile) ═══════════════════ */}
+      <CategorySection />
 
       {/* ═══════════════════ FEATURES / WHY US ═══════════════════ */}
       <section ref={featuresRef} className="bg-gray-50 py-20 sm:py-28">
@@ -174,9 +182,6 @@ export default function Home() {
           </div>
         </div>
       </section>
-
-      {/* ═══════════════════ CATEGORIES ═══════════════════ */}
-      <CategorySection />
 
       {/* ═══════════════════ TRUST SECTION ═══════════════════ */}
       <section className="bg-gray-50 py-16 sm:py-20">
