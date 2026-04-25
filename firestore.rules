@@ -20,9 +20,14 @@ service cloud.firestore {
     }
 
     // User profiles
+    // - Users self-create on signup
+    // - Admins can create customer profiles from POS / admin panel
+    //   (POS-created customers have no Firebase Auth user; admin writes
+    //   the doc with `role: "user"` and `createdViaPos: true`)
     match /user/{userId} {
       allow read: if isAuth();
-      allow create: if isOwner(userId);
+      allow create: if isOwner(userId)
+        || (isAdmin() && request.resource.data.role == 'user');
       allow update: if isOwner(userId) || isAdmin();
       allow delete: if isAdmin();
     }

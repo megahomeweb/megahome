@@ -25,8 +25,7 @@ import useProductStore from "@/store/useProductStore";
 import { useOrderStore } from "@/store/useOrderStore";
 import { formatUZS, formatNumber } from "@/lib/formatPrice";
 import { matchesSearch } from "@/lib/searchMatch";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-import { fireDB } from "@/firebase/config";
+import { auth } from "@/firebase/config";
 import type { ProductT, Order } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -1301,33 +1300,39 @@ function NewCustomerModal({
     }
     setSaving(true);
     try {
-      // Create a partial user record (no Firebase Auth — just a Firestore lead).
-      // For full auth/login, customer signs up themselves via /sign-up.
-      // POS-created customers are picked up by uid in subsequent sales.
-      const docRef = await addDoc(collection(fireDB, "user"), {
-        name: name.trim(),
-        phone: phone ? `+998${phone.replace(/\D/g, "")}` : "",
-        email: null,
-        role: "user",
-        time: serverTimestamp(),
-        date: new Date().toLocaleDateString("uz-UZ"),
-        customerType: type,
-        createdViaPos: true,
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        toast.error("Avtorizatsiya xatoligi");
+        return;
+      }
+      // Server route uses Admin SDK (bypasses rules), verifies admin/manager,
+      // dedupes by phone, normalizes to +998XXXXXXXXX.
+      const res = await fetch("/api/customers/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          name: name.trim(),
+          phone: phone || undefined,
+          customerType: type,
+        }),
       });
-      const newUser: UserData = {
-        uid: docRef.id,
-        name: name.trim(),
-        phone: phone ? `+998${phone.replace(/\D/g, "")}` : "",
-        email: null,
-        role: "user",
-        time: Date.now(),
-        date: new Date().toLocaleDateString("uz-UZ"),
-      };
-      toast.success("Mijoz qo'shildi");
-      onCreated(newUser);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data?.error || "Mijoz qoʻshilmadi");
+        return;
+      }
+      if (data.duplicate) {
+        toast.success("Bu telefon raqami bo'yicha mijoz topildi va tanlandi");
+      } else {
+        toast.success("Mijoz qoʻshildi");
+      }
+      onCreated(data.user as UserData);
     } catch (err) {
       console.error(err);
-      toast.error("Mijoz qo'shilmadi");
+      toast.error("Mijoz qoʻshilmadi");
     } finally {
       setSaving(false);
     }
