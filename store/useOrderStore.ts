@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { collection, query, onSnapshot, doc, updateDoc, getDoc, increment, writeBatch, Timestamp, where, addDoc } from "firebase/firestore";
+import { collection, query, onSnapshot, doc, increment, Timestamp, where, addDoc, runTransaction, orderBy } from "firebase/firestore";
 import { fireDB, auth } from '@/firebase/config';
 import { Order, OrderStatus, ProductT } from "@/lib/types";
 
@@ -138,36 +138,95 @@ export const useOrderStore = create<StoreState>((set, get) => ({
   },
 
   updateOrderStatus: async (orderId: string, status: OrderStatus) => {
+    // Atomic via Firestore transaction. Previous read-then-write left a
+    // race window: two admins clicking "yetkazildi" simultaneously both
+    // saw prevStatus="tasdiqlangan", both decremented stock, both updated
+    // status — stock decremented twice. Same for cancellation restore.
+    // The transaction makes the prevStatus check + stock change + status
+    // write all-or-nothing per concurrent attempt.
     try {
       const orderRef = doc(fireDB, "orders", orderId);
-      const orderSnap = await getDoc(orderRef);
-      if (!orderSnap.exists()) return;
+      const movementsToLog: Array<{
+        productId: string;
+        productTitle: string;
+        type: 'sotish' | 'qaytarish';
+        quantity: number;
+        stockBefore: number;
+        stockAfter: number;
+        reason: string;
+      }> = [];
 
-      const orderData = orderSnap.data();
-      const prevStatus = (orderData.status ?? 'yangi') as OrderStatus;
-      const basketItems = (orderData.basketItems ?? []) as ProductT[];
-      const stockReserved = orderData.stockReserved === true;
+      await runTransaction(fireDB, async (tx) => {
+        const orderSnap = await tx.get(orderRef);
+        if (!orderSnap.exists()) return;
 
-      // Decrement on DELIVERY only for LEGACY orders (no stockReserved flag).
-      // New orders were already decremented at creation time.
-      if (status === 'yetkazildi' && prevStatus !== 'yetkazildi' && !stockReserved) {
-        await decrementStock(basketItems, orderId, 'Buyurtma yetkazildi');
-      }
+        const orderData = orderSnap.data();
+        const prevStatus = (orderData.status ?? 'yangi') as OrderStatus;
+        const basketItems = (orderData.basketItems ?? []) as ProductT[];
+        const stockReserved = orderData.stockReserved === true;
 
-      // Restore stock on CANCELLATION — semantics depend on model:
-      //   - Reserved orders: restore whenever transitioning INTO cancelled
-      //     from a non-cancelled state (stock was already decremented at create).
-      //   - Legacy orders: restore only if cancelling from delivered
-      //     (stock was only decremented at delivery).
-      if (status === 'bekor_qilindi' && prevStatus !== 'bekor_qilindi') {
-        if (stockReserved) {
-          await restoreStock(basketItems, orderId, 'Buyurtma bekor qilindi');
-        } else if (prevStatus === 'yetkazildi') {
-          await restoreStock(basketItems, orderId, 'Buyurtma bekor qilindi');
+        // Idempotent: target status already set → no-op (covers concurrent
+        // double-clicks where the second tx re-reads after the first commits).
+        if (prevStatus === status) return;
+
+        const goingDelivered = status === 'yetkazildi' && prevStatus !== 'yetkazildi' && !stockReserved;
+        const goingCancelled = status === 'bekor_qilindi' && prevStatus !== 'bekor_qilindi'
+          && (stockReserved || prevStatus === 'yetkazildi');
+
+        // ── ALL READS first (Firestore tx requirement) ──
+        const productRefs = (goingDelivered || goingCancelled)
+          ? basketItems.filter((i) => i.id).map((i) => doc(fireDB, 'products', i.id))
+          : [];
+        const productSnaps = await Promise.all(productRefs.map((r) => tx.get(r)));
+
+        // ── ALL WRITES ──
+        if (goingDelivered) {
+          for (let i = 0; i < productSnaps.length; i++) {
+            const snap = productSnaps[i];
+            const item = basketItems[i];
+            const before = snap.exists() ? (snap.data().stock ?? 0) : 0;
+            tx.update(productRefs[i], { stock: increment(-item.quantity) });
+            movementsToLog.push({
+              productId: item.id,
+              productTitle: item.title || '',
+              type: 'sotish',
+              quantity: -item.quantity,
+              stockBefore: before,
+              stockAfter: before - item.quantity,
+              reason: 'Buyurtma yetkazildi',
+            });
+          }
+        } else if (goingCancelled) {
+          for (let i = 0; i < productSnaps.length; i++) {
+            const snap = productSnaps[i];
+            const item = basketItems[i];
+            const before = snap.exists() ? (snap.data().stock ?? 0) : 0;
+            tx.update(productRefs[i], { stock: increment(item.quantity) });
+            movementsToLog.push({
+              productId: item.id,
+              productTitle: item.title || '',
+              type: 'qaytarish',
+              quantity: item.quantity,
+              stockBefore: before,
+              stockAfter: before + item.quantity,
+              reason: 'Buyurtma bekor qilindi',
+            });
+          }
         }
-      }
 
-      await updateDoc(orderRef, { status });
+        tx.update(orderRef, { status });
+      });
+
+      // Audit log post-commit (best-effort; idempotency at the order layer
+      // ensures we never double-decrement, so duplicate movement logs are
+      // harmless if they ever occurred — but the tx prevents that anyway).
+      for (const m of movementsToLog) {
+        addDoc(collection(fireDB, 'stockMovements'), {
+          ...m,
+          reference: orderId,
+          timestamp: Timestamp.now(),
+        }).catch((err) => console.error('Error logging stock movement:', err));
+      }
     } catch (error) {
       console.error("Error updating order status:", error);
       throw error;
@@ -175,95 +234,27 @@ export const useOrderStore = create<StoreState>((set, get) => ({
   },
 
   bulkUpdateOrderStatus: async (orderIds: string[], status: OrderStatus) => {
-    const batch = writeBatch(fireDB);
+    // Each order goes through its own atomic updateOrderStatus call so the
+    // race-condition fix above also applies in bulk. Sacrifices some
+    // throughput vs the old single-batch approach but eliminates the
+    // double-decrement risk under concurrent admin clicks. A failed order
+    // doesn't block the rest.
     const results = { success: 0, failed: 0 };
-
-    const movementLogs: Array<{
-      productId: string;
-      productTitle: string;
-      type: 'sotish' | 'qaytarish';
-      quantity: number;
-      stockBefore: number;
-      reference: string;
-    }> = [];
-
+    const updateFn = get().updateOrderStatus;
     for (const orderId of orderIds) {
       try {
-        const orderRef = doc(fireDB, "orders", orderId);
-        const orderSnap = await getDoc(orderRef);
-        if (!orderSnap.exists()) { results.failed++; continue; }
-
-        const orderData = orderSnap.data();
-        const prevStatus = (orderData.status ?? 'yangi') as OrderStatus;
-        const basketItems = (orderData.basketItems ?? []) as ProductT[];
-        const stockReserved = orderData.stockReserved === true;
-
-        if (status === 'yetkazildi' && prevStatus !== 'yetkazildi' && !stockReserved) {
-          for (const item of basketItems) {
-            if (!item.id) continue;
-            const productSnap = await getDoc(doc(fireDB, "products", item.id));
-            const stockBefore = productSnap.exists() ? (productSnap.data().stock ?? 0) : 0;
-            batch.update(doc(fireDB, "products", item.id), { stock: increment(-item.quantity) });
-            movementLogs.push({
-              productId: item.id,
-              productTitle: item.title || '',
-              type: 'sotish',
-              quantity: -item.quantity,
-              stockBefore,
-              reference: orderId,
-            });
-          }
-        }
-
-        if (status === 'bekor_qilindi' && prevStatus !== 'bekor_qilindi') {
-          const shouldRestore = stockReserved || prevStatus === 'yetkazildi';
-          if (shouldRestore) {
-            for (const item of basketItems) {
-              if (!item.id) continue;
-              const productSnap = await getDoc(doc(fireDB, "products", item.id));
-              const stockBefore = productSnap.exists() ? (productSnap.data().stock ?? 0) : 0;
-              batch.update(doc(fireDB, "products", item.id), { stock: increment(item.quantity) });
-              movementLogs.push({
-                productId: item.id,
-                productTitle: item.title || '',
-                type: 'qaytarish',
-                quantity: item.quantity,
-                stockBefore,
-                reference: orderId,
-              });
-            }
-          }
-        }
-
-        batch.update(orderRef, { status });
+        await updateFn(orderId, status);
         results.success++;
-      } catch {
+      } catch (err) {
+        console.error(`bulkUpdateOrderStatus: order ${orderId} failed`, err);
         results.failed++;
       }
     }
-
-    await batch.commit();
-
-    for (const log of movementLogs) {
-      addDoc(collection(fireDB, "stockMovements"), {
-        productId: log.productId,
-        productTitle: log.productTitle,
-        type: log.type,
-        quantity: log.quantity,
-        stockBefore: log.stockBefore,
-        stockAfter: log.stockBefore + log.quantity,
-        reason: log.type === 'sotish' ? 'Buyurtma yetkazildi (ommaviy)' : 'Buyurtma bekor qilindi (ommaviy)',
-        reference: log.reference,
-        timestamp: Timestamp.now(),
-      }).catch((err) => console.error('Error logging stock movement:', err));
-    }
-
     set((state) => ({
       orders: state.orders.map((o) =>
         orderIds.includes(o.id) ? { ...o, status } : o
       ),
     }));
-
     return results;
   },
 
@@ -295,10 +286,18 @@ export const useOrderStore = create<StoreState>((set, get) => ({
   },
 
   fetchUserOrders: (userUid: string) => {
+    // Cleanup ensures we don't leak the previous listener when switching users
+    // or navigating between admin (all orders) and customer (own orders) views.
     get().cleanup();
     set({ loadingOrders: true });
     try {
-      const q = query(collection(fireDB, "orders"), where("userUid", "==", userUid));
+      // Server-side ordering by date desc — the customer history page
+      // previously rendered orders in arbitrary Firestore-default order.
+      const q = query(
+        collection(fireDB, "orders"),
+        where("userUid", "==", userUid),
+        orderBy("date", "desc"),
+      );
       const unsubscribe = onSnapshot(q, (QuerySnapshot) => {
         const OrderArray: Order[] = [];
         QuerySnapshot.forEach((d) => {
@@ -314,68 +313,6 @@ export const useOrderStore = create<StoreState>((set, get) => ({
   },
 }));
 
-// ── helpers ───────────────────────────────────────────────
-
-async function decrementStock(basketItems: ProductT[], orderId: string, reason: string) {
-  const stockSnapshots = new Map<string, number>();
-  for (const item of basketItems) {
-    if (!item.id) continue;
-    const productSnap = await getDoc(doc(fireDB, "products", item.id));
-    stockSnapshots.set(item.id, productSnap.exists() ? (productSnap.data().stock ?? 0) : 0);
-  }
-
-  const stockBatch = writeBatch(fireDB);
-  for (const item of basketItems) {
-    if (!item.id) continue;
-    stockBatch.update(doc(fireDB, "products", item.id), { stock: increment(-item.quantity) });
-  }
-  await stockBatch.commit();
-
-  for (const item of basketItems) {
-    if (!item.id) continue;
-    const stockBefore = stockSnapshots.get(item.id) ?? 0;
-    addDoc(collection(fireDB, "stockMovements"), {
-      productId: item.id,
-      productTitle: item.title,
-      type: 'sotish',
-      quantity: -item.quantity,
-      stockBefore,
-      stockAfter: stockBefore - item.quantity,
-      reason,
-      reference: orderId,
-      timestamp: Timestamp.now(),
-    }).catch((err) => console.error('Error logging stock movement:', err));
-  }
-}
-
-async function restoreStock(basketItems: ProductT[], orderId: string, reason: string) {
-  const stockSnapshots = new Map<string, number>();
-  for (const item of basketItems) {
-    if (!item.id) continue;
-    const productSnap = await getDoc(doc(fireDB, "products", item.id));
-    stockSnapshots.set(item.id, productSnap.exists() ? (productSnap.data().stock ?? 0) : 0);
-  }
-
-  const stockBatch = writeBatch(fireDB);
-  for (const item of basketItems) {
-    if (!item.id) continue;
-    stockBatch.update(doc(fireDB, "products", item.id), { stock: increment(item.quantity) });
-  }
-  await stockBatch.commit();
-
-  for (const item of basketItems) {
-    if (!item.id) continue;
-    const stockBefore = stockSnapshots.get(item.id) ?? 0;
-    addDoc(collection(fireDB, "stockMovements"), {
-      productId: item.id,
-      productTitle: item.title,
-      type: 'qaytarish',
-      quantity: item.quantity,
-      stockBefore,
-      stockAfter: stockBefore + item.quantity,
-      reason,
-      reference: orderId,
-      timestamp: Timestamp.now(),
-    }).catch((err) => console.error('Error logging stock movement:', err));
-  }
-}
+// (decrementStock / restoreStock helpers removed — atomic logic now lives
+// inside `updateOrderStatus` via runTransaction. Bulk path calls
+// updateOrderStatus per order so the same atomicity applies.)
