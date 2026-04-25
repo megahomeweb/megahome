@@ -1,5 +1,21 @@
 "use client";
 
+/**
+ * Sotuv nuqtasi — POS reworked to match bito.online UX.
+ *
+ * Layout: two-pane on desktop (lg+), single-pane stack on mobile with the
+ * customer/payment panel collapsed into a bottom drawer.
+ *
+ * Quantity model (intentionally bito-faithful):
+ *   - Adding a product → row created with `qty = null` (empty input).
+ *   - Empty/0 quantity → red error "0 dan katta qiymat kiriting", `Jami narxi`
+ *     shows 0, and the row does NOT add to JAMI total.
+ *   - Valid integer ≥ 1 → live calc Jami narxi = qty × narx, summed into JAMI.
+ *
+ * Atomic commit: same `/api/orders/create` extended for `paymentBreakdown`
+ * + `nasiya` ledger. UI here is a pure restyling on top of that contract.
+ */
+
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -9,6 +25,8 @@ import useProductStore from "@/store/useProductStore";
 import { useOrderStore } from "@/store/useOrderStore";
 import { formatUZS, formatNumber } from "@/lib/formatPrice";
 import { matchesSearch } from "@/lib/searchMatch";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { fireDB } from "@/firebase/config";
 import type { ProductT, Order } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,21 +34,26 @@ import {
   X,
   Plus,
   Minus,
-  ShoppingCart,
   Package,
   Check,
   User,
-  Phone,
+  Filter,
+  ScanLine,
+  Printer,
+  ReceiptText,
+  Undo2,
+  MoreHorizontal,
+  Copy,
   Trash2,
-  ChevronDown,
-  ChevronUp,
+  Info,
   Wallet,
-  Clock3,
-  Layers,
-  Send,
-  RotateCcw,
-  AlertCircle,
-  Receipt,
+  ArrowLeftRight,
+  CalendarClock,
+  HandCoins,
+  PercentCircle,
+  ShoppingCart,
+  UserPlus,
+  PanelRightOpen,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────
@@ -39,14 +62,11 @@ import {
 
 interface CartLine {
   product: ProductT;
-  quantity: number;
+  /** null = empty input (no qty entered yet); 0 = explicit invalid; ≥1 = valid */
+  qty: number | null;
 }
 
-type Tender = {
-  cash: number;
-  nasiya: number;
-  nasiyaDueDate?: string; // YYYY-MM-DD
-};
+type PaymentMode = "naqd" | "pul_otkazish" | "muddatli" | "qarz" | null;
 
 type Stage = "shopping" | "tender" | "success";
 
@@ -55,8 +75,7 @@ interface SuccessInfo {
   total: number;
   netTotal: number;
   cashGiven: number;
-  change: number;
-  method: "naqd" | "nasiya" | "aralash";
+  method: PaymentMode;
   customerName: string;
   customerPhone: string;
   itemCount: number;
@@ -68,7 +87,7 @@ interface SuccessInfo {
 
 export default function PosScreen() {
   const router = useRouter();
-  const { users, fetchAllUsers } = useAuthStore();
+  const { users, userData, fetchAllUsers } = useAuthStore();
   const { products, fetchProducts } = useProductStore();
   const { orders, createOrder, fetchAllOrders } = useOrderStore();
 
@@ -87,38 +106,89 @@ export default function PosScreen() {
 
   // ── Ticket state ─────────────────────────────────────────
   const [customer, setCustomer] = useState<UserData | null>(null);
+  const [responsible, setResponsible] = useState<UserData | null>(null);
+  const [responsibleNote, setResponsibleNote] = useState<string>("");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [discount, setDiscount] = useState<{ type: "pct" | "abs"; value: number }>({ type: "pct", value: 0 });
 
-  // ── Sheet visibility ─────────────────────────────────────
-  const [customerSheetOpen, setCustomerSheetOpen] = useState(false);
-  const [cartSheetOpen, setCartSheetOpen] = useState(false);
-  const [stage, setStage] = useState<Stage>("shopping");
+  // Default responsible to the logged-in admin once user data lands
+  useEffect(() => {
+    if (!responsible && userData) {
+      setResponsible(userData as UserData);
+    }
+  }, [userData, responsible]);
 
   // ── Search ───────────────────────────────────────────────
   const [productSearch, setProductSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-
+  const [showProductPicker, setShowProductPicker] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(productSearch.trim()), 200);
     return () => clearTimeout(t);
   }, [productSearch]);
 
-  // ── Submission state ─────────────────────────────────────
+  const productSearchRef = useRef<HTMLInputElement>(null);
+  const customerSearchRef = useRef<HTMLInputElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+
+  // ── Modal / sheet visibility ────────────────────────────
+  const [customerSheetOpen, setCustomerSheetOpen] = useState(false);
+  const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
+  const [showResponsibleModal, setShowResponsibleModal] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [rightPanelOpen, setRightPanelOpen] = useState(false); // mobile drawer
+  const [stage, setStage] = useState<Stage>("shopping");
+
+  // ── Submit state ─────────────────────────────────────────
   const [submitting, setSubmitting] = useState(false);
   const [successInfo, setSuccessInfo] = useState<SuccessInfo | null>(null);
+
+  // Close more-menu on outside click
+  useEffect(() => {
+    if (!showMoreMenu) return;
+    const onClick = (e: MouseEvent) => {
+      if (!moreMenuRef.current?.contains(e.target as Node)) setShowMoreMenu(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [showMoreMenu]);
+
+  // Keyboard shortcuts (bito parity)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Ignore when an input/textarea has focus, except for our specific shortcuts
+      const target = e.target as HTMLElement | null;
+      const inField = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.getAttribute("contenteditable") === "true";
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        productSearchRef.current?.focus();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && !inField) {
+        e.preventDefault();
+        customerSearchRef.current?.focus();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        if (canFinalize()) setStage("tender");
+        return;
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart, discount]);
 
   // ─────────────────────────────────────────────────────────
   // Derived data
   // ─────────────────────────────────────────────────────────
-
-  const filteredCustomers = useMemo(() => {
-    const nonAdmins = users.filter((u) => u.role !== "admin");
-    return nonAdmins;
-  }, [users]);
+  const filteredCustomers = useMemo(
+    () => users.filter((u) => u.role !== "admin"),
+    [users],
+  );
 
   // Outstanding nasiya balance per customer — derived from orders with paymentBreakdown.
-  // Future: replace with live read from `nasiya` collection.
   const balanceByUid = useMemo(() => {
     const m = new Map<string, number>();
     for (const o of orders) {
@@ -126,16 +196,14 @@ export default function PosScreen() {
       const breakdown = (o as Order & { paymentBreakdown?: Array<{ method: string; amount: number }> }).paymentBreakdown;
       if (!breakdown) continue;
       for (const e of breakdown) {
-        if (e.method === "nasiya") {
-          m.set(o.userUid, (m.get(o.userUid) ?? 0) + e.amount);
-        }
+        if (e.method === "nasiya") m.set(o.userUid, (m.get(o.userUid) ?? 0) + e.amount);
       }
     }
     return m;
   }, [orders]);
 
   const filteredProducts = useMemo(() => {
-    if (debouncedSearch.length < 1) return products.slice(0, 60);
+    if (debouncedSearch.length < 1) return products.slice(0, 80);
     return products.filter(
       (p) =>
         matchesSearch(p.title, debouncedSearch) ||
@@ -144,56 +212,30 @@ export default function PosScreen() {
     );
   }, [products, debouncedSearch]);
 
-  // Frequents = top 8 products by recent sales count overall.
-  const frequents = useMemo(() => {
-    const counts = new Map<string, { product: ProductT; count: number }>();
-    for (const o of orders.slice(0, 60)) {
-      for (const it of o.basketItems ?? []) {
-        const live = products.find((p) => p.id === it.id);
-        if (!live) continue;
-        const prev = counts.get(it.id) || { product: live, count: 0 };
-        prev.count += it.quantity;
-        counts.set(it.id, prev);
-      }
-    }
-    return Array.from(counts.values())
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 8);
-  }, [orders, products]);
-
-  // ── Customer-specific frequents (when a customer is selected)
-  const customerFrequents = useMemo(() => {
-    if (!customer) return [];
-    const counts = new Map<string, { product: ProductT; count: number }>();
-    for (const o of orders.filter((x) => x.userUid === customer.uid)) {
-      for (const it of o.basketItems ?? []) {
-        const live = products.find((p) => p.id === it.id);
-        if (!live) continue;
-        const prev = counts.get(it.id) || { product: live, count: 0 };
-        prev.count += it.quantity;
-        counts.set(it.id, prev);
-      }
-    }
-    return Array.from(counts.values())
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 8);
-  }, [orders, products, customer]);
-
-  // ── Cart math ────────────────────────────────────────────
+  // ── Cart math (bito-faithful: rows with null/0 qty contribute 0) ──
   const subtotal = useMemo(
-    () => cart.reduce((s, l) => s + Number(l.product.price) * l.quantity, 0),
+    () => cart.reduce((s, l) => s + (l.qty && l.qty > 0 ? Number(l.product.price) * l.qty : 0), 0),
     [cart],
   );
-  const itemCount = useMemo(() => cart.reduce((s, l) => s + l.quantity, 0), [cart]);
-
+  const totalQty = useMemo(
+    () => cart.reduce((s, l) => s + (l.qty && l.qty > 0 ? l.qty : 0), 0),
+    [cart],
+  );
+  const validRowsCount = useMemo(
+    () => cart.filter((l) => l.qty && l.qty > 0).length,
+    [cart],
+  );
   const discountAmount = useMemo(() => {
     if (!discount.value) return 0;
     if (discount.type === "pct") return Math.round(subtotal * (discount.value / 100));
     return Math.min(Math.round(discount.value), subtotal);
   }, [discount, subtotal]);
-
   const netTotal = subtotal - discountAmount;
   const customerBalance = customer ? balanceByUid.get(customer.uid) ?? 0 : 0;
+
+  function canFinalize() {
+    return cart.length > 0 && validRowsCount > 0 && !submitting;
+  }
 
   // ─────────────────────────────────────────────────────────
   // Cart actions
@@ -202,61 +244,61 @@ export default function PosScreen() {
     setCart((prev) => {
       const existing = prev.find((l) => l.product.id === product.id);
       if (existing) {
+        // If already in cart, increment by 1 (treats as next unit)
         return prev.map((l) =>
-          l.product.id === product.id ? { ...l, quantity: l.quantity + 1 } : l,
+          l.product.id === product.id
+            ? { ...l, qty: (l.qty ?? 0) + 1 }
+            : l,
         );
       }
-      return [...prev, { product, quantity: 1 }];
+      // First add: empty quantity (matches bito's behaviour exactly)
+      return [...prev, { product, qty: null }];
     });
   }, []);
 
-  const setQty = useCallback((productId: string, qty: number) => {
+  const setQty = useCallback((productId: string, raw: string) => {
     setCart((prev) =>
-      prev
-        .map((l) => (l.product.id === productId ? { ...l, quantity: Math.max(0, Math.floor(qty)) } : l))
-        .filter((l) => l.quantity > 0),
+      prev.map((l) => {
+        if (l.product.id !== productId) return l;
+        if (raw === "") return { ...l, qty: null };
+        const n = parseInt(raw, 10);
+        if (Number.isNaN(n)) return { ...l, qty: null };
+        return { ...l, qty: Math.max(0, n) };
+      }),
     );
   }, []);
 
   const incQty = useCallback((productId: string, delta: number) => {
     setCart((prev) =>
-      prev
-        .map((l) =>
-          l.product.id === productId
-            ? { ...l, quantity: Math.max(0, l.quantity + delta) }
-            : l,
-        )
-        .filter((l) => l.quantity > 0),
+      prev.map((l) => {
+        if (l.product.id !== productId) return l;
+        const next = (l.qty ?? 0) + delta;
+        return { ...l, qty: next > 0 ? next : 0 };
+      }),
     );
+  }, []);
+
+  const cloneLine = useCallback((productId: string) => {
+    setCart((prev) => {
+      const idx = prev.findIndex((l) => l.product.id === productId);
+      if (idx < 0) return prev;
+      // Insert a duplicate row right after — same product, qty null again
+      const next = [...prev];
+      next.splice(idx + 1, 0, { product: prev[idx].product, qty: null });
+      return next;
+    });
   }, []);
 
   const removeLine = useCallback((productId: string) => {
     setCart((prev) => prev.filter((l) => l.product.id !== productId));
   }, []);
 
-  const repeatLastOrderForCustomer = useCallback(
-    (uid: string) => {
-      const last = orders
-        .filter((o) => o.userUid === uid && o.status !== "bekor_qilindi")
-        .sort((a, b) => (b.date?.seconds || 0) - (a.date?.seconds || 0))[0];
-      if (!last) {
-        toast.error("Mijozda oldingi buyurtma yoʻq");
-        return;
-      }
-      const lines: CartLine[] = [];
-      for (const it of last.basketItems ?? []) {
-        const live = products.find((p) => p.id === it.id);
-        if (live) lines.push({ product: live, quantity: it.quantity });
-      }
-      if (lines.length === 0) {
-        toast.error("Oldingi buyurtmadagi mahsulotlar mavjud emas");
-        return;
-      }
-      setCart(lines);
-      toast.success(`${lines.length} ta mahsulot qoʻshildi`);
-    },
-    [orders, products],
-  );
+  const clearCart = useCallback(() => {
+    if (cart.length === 0) return;
+    if (!window.confirm("Savatdagi barcha mahsulotlarni o'chirishni istaysizmi?")) return;
+    setCart([]);
+    setDiscount({ type: "pct", value: 0 });
+  }, [cart.length]);
 
   const resetTicket = useCallback(() => {
     setCart([]);
@@ -264,25 +306,26 @@ export default function PosScreen() {
     setDiscount({ type: "pct", value: 0 });
     setProductSearch("");
     setStage("shopping");
-    setCartSheetOpen(false);
     setCustomerSheetOpen(false);
     setSuccessInfo(null);
+    setRightPanelOpen(false);
   }, []);
 
   // ─────────────────────────────────────────────────────────
   // Submit (commit sale)
   // ─────────────────────────────────────────────────────────
   const commitSale = useCallback(
-    async (tender: Tender) => {
-      if (cart.length === 0) return;
-      if (tender.cash + tender.nasiya !== netTotal) {
-        toast.error("Toʻlov yigʻindisi summa bilan mos kelmadi");
+    async (mode: PaymentMode, opts?: { cashGiven?: number; nasiyaDueDate?: string; mixCash?: number }) => {
+      const validLines = cart.filter((l) => l.qty && l.qty > 0);
+      if (validLines.length === 0) {
+        toast.error("Hech qanday mahsulot tanlanmagan yoki miqdor noto'g'ri");
         return;
       }
-      if (tender.nasiya > 0 && !customer) {
-        toast.error("Nasiya uchun mijoz kerak");
+      if ((mode === "qarz" || mode === "muddatli") && !customer) {
+        toast.error("Qarz uchun mijoz tanlanishi shart");
         return;
       }
+
       setSubmitting(true);
       try {
         const breakdown: Array<{
@@ -290,17 +333,23 @@ export default function PosScreen() {
           amount: number;
           dueDate?: string;
         }> = [];
-        if (tender.cash > 0) breakdown.push({ method: "naqd", amount: tender.cash });
-        if (tender.nasiya > 0) {
+
+        if (mode === "naqd") {
+          breakdown.push({ method: "naqd", amount: netTotal });
+        } else if (mode === "pul_otkazish") {
+          breakdown.push({ method: "karta", amount: netTotal });
+        } else if (mode === "qarz") {
+          breakdown.push({ method: "nasiya", amount: netTotal });
+        } else if (mode === "muddatli") {
           breakdown.push({
             method: "nasiya",
-            amount: tender.nasiya,
-            ...(tender.nasiyaDueDate ? { dueDate: tender.nasiyaDueDate } : {}),
+            amount: netTotal,
+            ...(opts?.nasiyaDueDate ? { dueDate: opts.nasiyaDueDate } : {}),
           });
         }
 
         const result = await createOrder({
-          items: cart.map(({ product, quantity }) => ({ productId: product.id, quantity })),
+          items: validLines.map(({ product, qty }) => ({ productId: product.id, quantity: qty as number })),
           clientName: customer?.name ?? "Mijoz",
           clientPhone: customer?.phone ?? "",
           targetUserUid: customer?.uid,
@@ -308,6 +357,7 @@ export default function PosScreen() {
           paymentBreakdown: breakdown,
           ticketDiscount: discount.value > 0 ? discount : undefined,
           source: "pos",
+          orderNote: responsibleNote || undefined,
         });
 
         if (!result.ok) {
@@ -316,30 +366,23 @@ export default function PosScreen() {
             toast.error(`Omborda yetarli emas: ${names}`);
           } else if (result.status === 403) {
             toast.error("Faqat admin boshqa mijoz uchun sotuv qila oladi");
-          } else if (result.status === 400 && result.message?.includes("Toʻlov")) {
-            toast.error("Toʻlov yigʻindisi notoʻgʻri");
           } else {
             toast.error(result.message || "Sotuv yakunlanmadi");
           }
           return;
         }
 
-        const method: SuccessInfo["method"] =
-          tender.cash > 0 && tender.nasiya > 0 ? "aralash" : tender.nasiya > 0 ? "nasiya" : "naqd";
-
         setSuccessInfo({
           orderId: result.orderId,
           total: subtotal,
           netTotal,
-          cashGiven: tender.cash,
-          change: 0, // computed in tender sheet for display only; real change tracked there
-          method,
+          cashGiven: opts?.cashGiven ?? 0,
+          method: mode,
           customerName: customer?.name ?? "Mijoz",
           customerPhone: customer?.phone ?? "",
-          itemCount,
+          itemCount: validLines.reduce((s, l) => s + (l.qty as number), 0),
         });
         setStage("success");
-        setCartSheetOpen(false);
         toast.success("Sotuv muvaffaqiyatli yakunlandi");
       } catch (err) {
         console.error("POS commit error:", err);
@@ -348,254 +391,188 @@ export default function PosScreen() {
         setSubmitting(false);
       }
     },
-    [cart, netTotal, customer, subtotal, discount, itemCount, createOrder],
+    [cart, netTotal, customer, subtotal, discount, createOrder, responsibleNote],
   );
 
   // ─────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────
   if (stage === "success" && successInfo) {
-    return (
-      <PosSuccess info={successInfo} onNew={resetTicket} onBack={() => router.push("/admin/orders")} />
-    );
+    return <PosSuccess info={successInfo} onNew={resetTicket} onBack={() => router.push("/admin/orders")} />;
   }
 
+  const sellerName = responsible?.name ?? userData?.name ?? "—";
+
   return (
-    <div className="min-h-[100dvh] bg-gray-50 flex flex-col" data-no-swipe>
-      {/* ── Top bar: customer chip ───────────────────────── */}
-      <div className="sticky top-0 z-30 bg-white border-b border-gray-200 px-3 sm:px-4 py-2.5 flex items-center gap-2">
+    <div className="flex flex-col h-[100dvh] bg-gray-50" data-no-swipe>
+      {/* ╔═══ TOP HEADER (title + action toolbar) ═══════════════════════ */}
+      <header className="bg-white border-b border-gray-200 px-3 sm:px-5 py-2.5 flex items-center gap-3 shrink-0">
         <button
-          onClick={() => router.push("/admin")}
-          className="p-2 -ml-1 hover:bg-gray-100 rounded-lg active:scale-95 transition"
+          onClick={() => {
+            if (cart.length > 0) {
+              if (!window.confirm("Savatda mahsulotlar bor. Chiqib ketishni istaysizmi?")) return;
+            }
+            router.push("/admin");
+          }}
+          className="p-1.5 -ml-1 hover:bg-gray-100 rounded-lg active:scale-95 transition lg:hidden"
           aria-label="Orqaga"
         >
           <X className="size-5 text-gray-600" />
         </button>
-        <h1 className="text-base font-bold text-gray-900 hidden sm:block">Sotuv nuqtasi</h1>
+        <h1 className="text-xl font-bold text-gray-900">Sotuv</h1>
+        <div className="flex-1" />
+        <div className="hidden sm:flex items-center gap-1.5">
+          <ToolbarIcon Icon={Filter} title="Filtr" />
+          <ToolbarIcon Icon={ScanLine} title="Skanerlash" />
+          <ToolbarIcon Icon={ScanLine} title="QR" rotated />
+          <ToolbarIcon Icon={ScanLine} title="Barkod" active />
+          <ToolbarIcon Icon={Printer} title="Chop etish" />
+          <ToolbarIcon Icon={ReceiptText} title="Cheklar ro'yxati" />
+          <ToolbarIcon Icon={Undo2} title="Qaytarish" />
+          <div ref={moreMenuRef} className="relative">
+            <ToolbarIcon Icon={MoreHorizontal} title="Qo'shimcha" onClick={() => setShowMoreMenu((v) => !v)} />
+            {showMoreMenu && <MoreMenu onClose={() => setShowMoreMenu(false)} />}
+          </div>
+        </div>
+        {/* Mobile: button to open right panel */}
         <button
-          onClick={() => setCustomerSheetOpen(true)}
-          className={`flex-1 ml-1 sm:ml-2 flex items-center gap-2 rounded-xl px-3 py-2 border transition ${
-            customer
-              ? "bg-blue-50 border-blue-200 hover:bg-blue-100"
-              : "bg-gray-50 border-dashed border-gray-300 hover:bg-gray-100"
-          }`}
+          onClick={() => setRightPanelOpen(true)}
+          className="lg:hidden flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 active:scale-95 transition"
+          aria-label="To'lov paneli"
         >
-          <User className={`size-4 shrink-0 ${customer ? "text-blue-600" : "text-gray-400"}`} />
-          <div className="min-w-0 text-left flex-1">
-            {customer ? (
-              <>
-                <p className="text-sm font-semibold text-gray-900 truncate">{customer.name}</p>
-                <p className="text-[11px] text-gray-500 truncate">{customer.phone || "telefon yoʻq"}</p>
-              </>
+          <PanelRightOpen className="size-4" />
+          <span className="text-xs font-bold tabular-nums">{formatNumber(netTotal)}</span>
+        </button>
+      </header>
+
+      {/* ╔═══ MAIN CONTENT (two-pane on desktop) ════════════════════════ */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* ── LEFT PANE: search + cart ──────────────────────────────── */}
+        <main className="flex-1 flex flex-col overflow-hidden lg:border-r lg:border-gray-200">
+          {/* Product search (Ctrl+F) */}
+          <div className="px-3 sm:px-5 pt-3 pb-2 bg-white border-b border-gray-100 shrink-0">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400 pointer-events-none" />
+              <input
+                ref={productSearchRef}
+                type="text"
+                placeholder="Mahsulot nomi, barkod yoki SKU"
+                value={productSearch}
+                onChange={(e) => {
+                  setProductSearch(e.target.value);
+                  setShowProductPicker(true);
+                }}
+                onFocus={() => setShowProductPicker(true)}
+                className="w-full pl-10 pr-20 py-3 rounded-xl border border-gray-200 bg-white text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              />
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-gray-500 bg-gray-100 border border-gray-200 rounded-md px-1.5 py-0.5">
+                Ctrl+F
+              </span>
+            </div>
+          </div>
+
+          {/* Mas'ul shaxs pill row */}
+          <div className="px-3 sm:px-5 py-3 bg-white flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setShowResponsibleModal(true)}
+              className="px-4 py-1.5 rounded-full bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold flex items-center gap-1.5 active:scale-95 transition shadow-sm shadow-blue-500/30"
+            >
+              {sellerName}
+            </button>
+            <button
+              onClick={() => setShowResponsibleModal(true)}
+              className="size-8 rounded-full border-2 border-blue-500 hover:bg-blue-50 flex items-center justify-center text-blue-600 active:scale-95 transition"
+              aria-label="Qo'shimcha mas'ul shaxs"
+            >
+              <Plus className="size-4" />
+            </button>
+          </div>
+
+          {/* Cart table */}
+          <div className="flex-1 overflow-auto px-3 sm:px-5 pb-4">
+            {/* Header row */}
+            <div className="grid grid-cols-[24px_minmax(0,1.5fr)_60px_minmax(120px,1fr)_70px_90px_90px_64px] gap-2 px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 border-b border-gray-200 sticky top-0 bg-gray-50 z-10">
+              <span>#</span>
+              <span>Nomi</span>
+              <span className="hidden md:inline">SKU</span>
+              <span>Miqdor</span>
+              <span className="hidden md:inline">Jami miqdor</span>
+              <span className="text-right">Narx</span>
+              <span className="text-right">Jami narxi</span>
+              <span className="text-right pr-2">
+                <button
+                  onClick={clearCart}
+                  className="inline-flex items-center justify-center size-6 hover:bg-red-50 rounded-md active:scale-95 transition text-red-500"
+                  title="Savatni tozalash"
+                  aria-label="Savatni tozalash"
+                >
+                  <BroomIcon className="size-4" />
+                </button>
+              </span>
+            </div>
+
+            {cart.length === 0 ? (
+              <EmptyCart />
             ) : (
-              <p className="text-sm text-gray-500">Mijozni tanlash</p>
+              <div className="space-y-0.5 mt-1">
+                {cart.map((line, idx) => (
+                  <CartRow
+                    key={line.product.id + idx}
+                    index={idx + 1}
+                    line={line}
+                    onSetQty={(raw) => setQty(line.product.id, raw)}
+                    onInc={(d) => incQty(line.product.id, d)}
+                    onClone={() => cloneLine(line.product.id)}
+                    onRemove={() => removeLine(line.product.id)}
+                  />
+                ))}
+              </div>
             )}
           </div>
-          {customer && customerBalance > 0 && (
-            <span className="text-[11px] font-bold text-red-600 bg-red-50 border border-red-200 rounded-md px-1.5 py-0.5 shrink-0">
-              Qarz: {formatNumber(customerBalance)}
-            </span>
-          )}
-          {customer && (
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={(e) => {
-                e.stopPropagation();
-                setCustomer(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.stopPropagation();
-                  setCustomer(null);
-                }
-              }}
-              className="p-1 hover:bg-blue-200 rounded shrink-0 cursor-pointer"
-              aria-label="Mijozni olib tashlash"
-            >
-              <X className="size-3.5 text-blue-700" />
-            </span>
-          )}
-        </button>
-      </div>
 
-      {/* ── Search bar ─────────────────────────────────────── */}
-      <div className="sticky top-[57px] z-20 bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-100">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Mahsulot qidirish..."
-            value={productSearch}
-            onChange={(e) => setProductSearch(e.target.value)}
-            className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-gray-200 bg-white text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-            autoFocus
+          {/* Footer info bar (desktop) */}
+          <FooterBar sellerName={sellerName} />
+        </main>
+
+        {/* ── RIGHT PANE: customer + payment ───────────────────────── */}
+        <aside
+          className={`fixed lg:static top-0 right-0 h-[100dvh] w-full sm:w-96 lg:w-[380px] xl:w-[420px] bg-white shrink-0 z-40 flex flex-col transition-transform duration-300 ease-out ${
+            rightPanelOpen ? "translate-x-0" : "translate-x-full lg:translate-x-0"
+          }`}
+        >
+          <RightPanel
+            customer={customer}
+            customerBalance={customerBalance}
+            onClearCustomer={() => setCustomer(null)}
+            onOpenCustomerSheet={() => setCustomerSheetOpen(true)}
+            onOpenNewCustomer={() => setShowNewCustomerModal(true)}
+            customerSearchRef={customerSearchRef}
+            netTotal={netTotal}
+            subtotal={subtotal}
+            discountAmount={discountAmount}
+            discount={discount}
+            onChangeDiscount={setDiscount}
+            canFinalize={canFinalize()}
+            submitting={submitting}
+            cartLen={cart.length}
+            validRows={validRowsCount}
+            totalQty={totalQty}
+            onPay={(mode, opts) => commitSale(mode, opts)}
+            onReset={resetTicket}
+            onClose={() => setRightPanelOpen(false)}
           />
-          {productSearch && (
-            <button
-              onClick={() => setProductSearch("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 hover:bg-gray-100 rounded-lg"
-              aria-label="Qidiruvni tozalash"
-            >
-              <X className="size-4 text-gray-400" />
-            </button>
-          )}
-        </div>
-      </div>
+        </aside>
 
-      {/* ── Frequents row ──────────────────────────────────── */}
-      {(customerFrequents.length > 0 || frequents.length > 0) && !debouncedSearch && (
-        <div className="px-3 sm:px-4 py-3 bg-white border-b border-gray-100 overflow-x-auto -mb-px">
-          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-2">
-            {customer ? "Tez-tez buyuradi" : "Eng koʻp sotiluvchi"}
-          </p>
-          <div className="flex gap-2 min-w-max">
-            {(customer ? customerFrequents : frequents).map(({ product }) => {
-              const inCart = cart.some((l) => l.product.id === product.id);
-              return (
-                <button
-                  key={product.id}
-                  onClick={() => addProduct(product)}
-                  className={`shrink-0 w-32 rounded-xl border p-2 text-left active:scale-[0.98] transition ${
-                    inCart
-                      ? "border-blue-400 bg-blue-50"
-                      : "border-gray-200 bg-white hover:border-gray-300"
-                  }`}
-                >
-                  <div className="relative w-full aspect-square rounded-lg bg-gray-100 overflow-hidden mb-1.5">
-                    {product.productImageUrl?.[0]?.url ? (
-                      <Image
-                        src={product.productImageUrl[0].url}
-                        alt={product.title}
-                        fill
-                        className="object-cover"
-                        sizes="128px"
-                      />
-                    ) : (
-                      <div className="size-full flex items-center justify-center">
-                        <Package className="size-6 text-gray-300" />
-                      </div>
-                    )}
-                    {inCart && (
-                      <div className="absolute top-1 right-1 size-5 rounded-full bg-blue-500 flex items-center justify-center">
-                        <Check className="size-3 text-white" />
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-[11px] font-semibold text-gray-900 line-clamp-2 leading-tight">{product.title}</p>
-                  <p className="text-[11px] font-bold text-gray-700 mt-0.5">{formatUZS(product.price)}</p>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── Result rows ────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-3 space-y-2 pb-28">
-        {filteredProducts.length === 0 ? (
-          <div className="text-center py-16 text-gray-400">
-            <Package className="size-10 mx-auto mb-2 opacity-30" />
-            <p className="text-sm">Mahsulot topilmadi</p>
-          </div>
-        ) : (
-          filteredProducts.map((product) => {
-            const line = cart.find((l) => l.product.id === product.id);
-            const stockNum = typeof product.stock === "number" ? product.stock : 0;
-            return (
-              <div
-                key={product.id}
-                className="flex items-center gap-3 bg-white rounded-xl border border-gray-200 p-2.5 sm:p-3"
-              >
-                <div className="relative size-14 sm:size-16 rounded-lg bg-gray-100 overflow-hidden shrink-0">
-                  {product.productImageUrl?.[0]?.url ? (
-                    <Image
-                      src={product.productImageUrl[0].url}
-                      alt={product.title}
-                      fill
-                      className="object-cover"
-                      sizes="64px"
-                    />
-                  ) : (
-                    <div className="size-full flex items-center justify-center">
-                      <Package className="size-5 text-gray-300" />
-                    </div>
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-gray-900 line-clamp-2 leading-tight">{product.title}</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <p className="text-sm font-bold text-gray-900">{formatUZS(product.price)}</p>
-                    <span
-                      className={`text-[10px] font-medium rounded px-1.5 py-0.5 ${
-                        stockNum <= 0
-                          ? "bg-red-50 text-red-600"
-                          : stockNum < 5
-                          ? "bg-amber-50 text-amber-700"
-                          : "bg-green-50 text-green-700"
-                      }`}
-                    >
-                      {stockNum > 0 ? `${stockNum} dona` : "tugagan"}
-                    </span>
-                  </div>
-                </div>
-                {line ? (
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() => incQty(product.id, -1)}
-                      className="size-9 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center active:scale-95 transition"
-                    >
-                      <Minus className="size-4 text-gray-700" />
-                    </button>
-                    <span className="min-w-[2rem] text-center text-sm font-bold text-gray-900 tabular-nums">
-                      {line.quantity}
-                    </span>
-                    <button
-                      onClick={() => addProduct(product)}
-                      className="size-9 rounded-lg bg-blue-500 hover:bg-blue-600 flex items-center justify-center active:scale-95 transition"
-                    >
-                      <Plus className="size-4 text-white" />
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => addProduct(product)}
-                    className="shrink-0 size-10 rounded-xl bg-blue-500 hover:bg-blue-600 flex items-center justify-center active:scale-95 transition shadow-sm shadow-blue-500/20"
-                  >
-                    <Plus className="size-5 text-white" />
-                  </button>
-                )}
-              </div>
-            );
-          })
+        {/* Mobile right-panel backdrop */}
+        {rightPanelOpen && (
+          <div
+            className="lg:hidden fixed inset-0 bg-black/50 z-30"
+            onClick={() => setRightPanelOpen(false)}
+          />
         )}
       </div>
 
-      {/* ── Sticky bottom bar / Charge ──────────────────────── */}
-      {cart.length > 0 && (
-        <div className="fixed bottom-0 inset-x-0 z-30 bg-white border-t border-gray-200 px-3 sm:px-4 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(0,0,0,0.05)]">
-          <div className="flex items-center gap-2 max-w-3xl mx-auto">
-            <button
-              onClick={() => setCartSheetOpen(true)}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 hover:bg-gray-100 active:scale-[0.98] transition"
-            >
-              <ShoppingCart className="size-4 text-gray-700" />
-              <span className="text-sm font-bold text-gray-900">{itemCount}</span>
-              <ChevronUp className="size-4 text-gray-500" />
-            </button>
-            <button
-              onClick={() => setStage("tender")}
-              disabled={cart.length === 0}
-              className="flex-1 flex items-center justify-between gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white rounded-xl px-4 py-3 shadow-sm shadow-emerald-500/20 active:scale-[0.99] transition"
-            >
-              <span className="text-sm font-bold">TOʻLOV</span>
-              <span className="text-base font-extrabold tabular-nums">{formatUZS(netTotal)}</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Customer picker sheet ─────────────────────────── */}
+      {/* ── Customer picker sheet ─────────────────────────────────── */}
       {customerSheetOpen && (
         <CustomerPickerSheet
           users={filteredCustomers}
@@ -604,44 +581,53 @@ export default function PosScreen() {
             setCustomer(u);
             setCustomerSheetOpen(false);
           }}
-          onPickAndRepeat={(u) => {
-            setCustomer(u);
+          onAddNew={() => {
             setCustomerSheetOpen(false);
-            setTimeout(() => repeatLastOrderForCustomer(u.uid), 50);
+            setShowNewCustomerModal(true);
           }}
           onClose={() => setCustomerSheetOpen(false)}
         />
       )}
 
-      {/* ── Cart sheet ────────────────────────────────────── */}
-      {cartSheetOpen && (
-        <CartSheet
-          cart={cart}
-          subtotal={subtotal}
-          discount={discount}
-          discountAmount={discountAmount}
-          netTotal={netTotal}
-          onIncQty={incQty}
-          onSetQty={setQty}
-          onRemove={removeLine}
-          onChangeDiscount={setDiscount}
-          onClose={() => setCartSheetOpen(false)}
-          onCharge={() => {
-            setCartSheetOpen(false);
-            setStage("tender");
+      {/* ── Yangi mijoz modal ────────────────────────────────────── */}
+      {showNewCustomerModal && (
+        <NewCustomerModal
+          onClose={() => setShowNewCustomerModal(false)}
+          onCreated={(u) => {
+            setCustomer(u);
+            setShowNewCustomerModal(false);
           }}
         />
       )}
 
-      {/* ── Tender sheet ──────────────────────────────────── */}
-      {stage === "tender" && (
-        <TenderSheet
-          netTotal={netTotal}
-          customer={customer}
-          customerBalance={customerBalance}
-          submitting={submitting}
-          onCancel={() => setStage("shopping")}
-          onCommit={(tender) => commitSale(tender)}
+      {/* ── Mas'ul shaxs modal ──────────────────────────────────── */}
+      {showResponsibleModal && (
+        <ResponsibleModal
+          users={users}
+          current={responsible}
+          note={responsibleNote}
+          onSave={(u, n) => {
+            setResponsible(u);
+            setResponsibleNote(n);
+            setShowResponsibleModal(false);
+          }}
+          onClose={() => setShowResponsibleModal(false)}
+        />
+      )}
+
+      {/* ── Product picker dropdown (results below search) ───────── */}
+      {showProductPicker && (
+        <ProductPickerDropdown
+          results={filteredProducts}
+          search={debouncedSearch}
+          onPick={(p) => {
+            addProduct(p);
+            setProductSearch("");
+            setShowProductPicker(false);
+            productSearchRef.current?.focus();
+          }}
+          onClose={() => setShowProductPicker(false)}
+          cart={cart}
         />
       )}
     </div>
@@ -649,20 +635,574 @@ export default function PosScreen() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Customer picker (bottom sheet)
+// Toolbar Icon button
 // ─────────────────────────────────────────────────────────────
+function ToolbarIcon({
+  Icon,
+  title,
+  active,
+  rotated,
+  onClick,
+}: {
+  Icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  active?: boolean;
+  rotated?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      className={`size-9 rounded-lg flex items-center justify-center active:scale-95 transition ${
+        active
+          ? "bg-blue-500 text-white shadow-sm shadow-blue-500/30"
+          : "bg-blue-50 text-blue-600 hover:bg-blue-100"
+      }`}
+    >
+      <Icon className={`size-4 ${rotated ? "rotate-90" : ""}`} />
+    </button>
+  );
+}
 
+function BroomIcon({ className = "" }: { className?: string }) {
+  // Inline SVG broom — bito uses a red broom for "clear cart"
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+      <path d="m13 11 9-9" />
+      <path d="M14.6 12.6c.8.8.9 2 .2 2.8L9.6 21l-5.4-5.4 5.6-5.2c.8-.7 2-.6 2.8.2Z" />
+      <path d="m6.8 11.2 6 6" />
+      <path d="m4.2 15.6.4-1" />
+    </svg>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Empty cart state
+// ─────────────────────────────────────────────────────────────
+function EmptyCart() {
+  return (
+    <div className="flex flex-col items-center justify-center py-20 text-center">
+      <div className="size-24 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+        <ReceiptText className="size-10 text-gray-300" />
+      </div>
+      <p className="text-sm text-gray-400">Savat bo&apos;sh</p>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Cart row — bito's miqdor input model
+// ─────────────────────────────────────────────────────────────
+function CartRow({
+  index,
+  line,
+  onSetQty,
+  onInc,
+  onClone,
+  onRemove,
+}: {
+  index: number;
+  line: CartLine;
+  onSetQty: (raw: string) => void;
+  onInc: (delta: number) => void;
+  onClone: () => void;
+  onRemove: () => void;
+}) {
+  const { product, qty } = line;
+  const isInvalid = qty === null || qty === 0;
+  const lineTotal = qty && qty > 0 ? Number(product.price) * qty : 0;
+  const stockNum = typeof product.stock === "number" ? product.stock : 0;
+  const stockOver = !!qty && qty > stockNum;
+
+  return (
+    <div className="grid grid-cols-[24px_minmax(0,1.5fr)_60px_minmax(120px,1fr)_70px_90px_90px_64px] gap-2 px-2 py-2.5 items-start border-b border-gray-100 hover:bg-gray-50/50 transition-colors">
+      {/* # */}
+      <span className="text-sm text-gray-500 pt-2.5 tabular-nums">{index}</span>
+
+      {/* Nomi */}
+      <div className="min-w-0 flex items-center gap-2 pt-1.5">
+        <div className="relative size-9 rounded-md bg-gray-100 overflow-hidden shrink-0">
+          {product.productImageUrl?.[0]?.url ? (
+            <Image src={product.productImageUrl[0].url} alt={product.title} fill className="object-cover" sizes="36px" />
+          ) : (
+            <div className="size-full flex items-center justify-center"><Package className="size-4 text-gray-300" /></div>
+          )}
+        </div>
+        <p className="text-sm text-gray-900 line-clamp-2 leading-tight">{product.title}</p>
+      </div>
+
+      {/* SKU */}
+      <span className="text-sm text-gray-700 pt-2.5 hidden md:block">{(product.id || "").slice(0, 8)}</span>
+
+      {/* Miqdor — the bito-faithful input */}
+      <div className="min-w-0">
+        <div className="relative">
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            placeholder="Miqdorni kiriting"
+            value={qty === null ? "" : String(qty)}
+            onChange={(e) => onSetQty(e.target.value.replace(/[^0-9]/g, ""))}
+            onFocus={(e) => e.target.select()}
+            className={`w-full h-9 px-2.5 rounded-md text-sm font-medium outline-none tabular-nums transition ${
+              isInvalid
+                ? "border border-red-300 bg-red-50/50 text-red-700 focus:border-red-400 focus:ring-2 focus:ring-red-100 placeholder:text-red-400"
+                : "border border-gray-300 bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            }`}
+          />
+        </div>
+        {isInvalid && (
+          <p className="mt-1 text-[10px] text-red-500 leading-tight">0 dan katta qiymat kiriting</p>
+        )}
+        {!isInvalid && stockOver && (
+          <p className="mt-1 text-[10px] text-amber-600 leading-tight">Omborda atigi {stockNum} dona</p>
+        )}
+      </div>
+
+      {/* Jami miqdor (bito shows "X dona") */}
+      <span className="text-sm text-gray-700 pt-2.5 tabular-nums hidden md:block">
+        {qty && qty > 0 ? `${qty} dona` : "0 dona"}
+      </span>
+
+      {/* Narx */}
+      <span className="text-sm text-gray-900 pt-2.5 text-right tabular-nums">
+        {formatNumber(Number(product.price))}
+      </span>
+
+      {/* Jami narxi — 0 if invalid, calculated otherwise */}
+      <span
+        className={`text-sm pt-2.5 text-right tabular-nums font-semibold ${
+          isInvalid ? "text-gray-400" : "text-gray-900"
+        }`}
+      >
+        {isInvalid ? "0" : formatNumber(lineTotal)}
+      </span>
+
+      {/* Actions */}
+      <div className="flex items-center gap-1 pt-1.5 justify-end">
+        <button
+          onClick={onClone}
+          title="Nusxa"
+          aria-label="Nusxa"
+          className="size-8 rounded-md hover:bg-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-700 active:scale-95 transition"
+        >
+          <Copy className="size-3.5" />
+        </button>
+        <button
+          onClick={onRemove}
+          title="O'chirish"
+          aria-label="Qatorni o'chirish"
+          className="size-8 rounded-full border-2 border-red-300 hover:bg-red-50 hover:border-red-500 flex items-center justify-center text-red-500 active:scale-95 transition"
+        >
+          <Minus className="size-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Right panel (customer + payment)
+// ─────────────────────────────────────────────────────────────
+function RightPanel({
+  customer,
+  customerBalance,
+  onClearCustomer,
+  onOpenCustomerSheet,
+  onOpenNewCustomer,
+  customerSearchRef,
+  netTotal,
+  subtotal,
+  discountAmount,
+  discount,
+  onChangeDiscount,
+  canFinalize,
+  submitting,
+  cartLen,
+  validRows,
+  totalQty,
+  onPay,
+  onReset,
+  onClose,
+}: {
+  customer: UserData | null;
+  customerBalance: number;
+  onClearCustomer: () => void;
+  onOpenCustomerSheet: () => void;
+  onOpenNewCustomer: () => void;
+  customerSearchRef: React.RefObject<HTMLInputElement | null>;
+  netTotal: number;
+  subtotal: number;
+  discountAmount: number;
+  discount: { type: "pct" | "abs"; value: number };
+  onChangeDiscount: (d: { type: "pct" | "abs"; value: number }) => void;
+  canFinalize: boolean;
+  submitting: boolean;
+  cartLen: number;
+  validRows: number;
+  totalQty: number;
+  onPay: (mode: PaymentMode, opts?: { cashGiven?: number; nasiyaDueDate?: string; mixCash?: number }) => void;
+  onReset: () => void;
+  onClose: () => void;
+}) {
+  const [showDiscount, setShowDiscount] = useState(discount.value > 0);
+  const [showDueDate, setShowDueDate] = useState(false);
+  const [dueDate, setDueDate] = useState("");
+
+  return (
+    <>
+      {/* Mobile close button */}
+      <div className="lg:hidden flex items-center justify-between px-4 py-3 border-b border-gray-200">
+        <h3 className="text-base font-bold text-gray-900">Mijoz va to&apos;lov</h3>
+        <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg" aria-label="Yopish">
+          <X className="size-5 text-gray-500" />
+        </button>
+      </div>
+
+      {/* Customer search row */}
+      <div className="px-3 sm:px-4 pt-3 sm:pt-4 pb-2 shrink-0">
+        <div className="flex items-center gap-1.5">
+          <div className="relative flex-1 min-w-0">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400 pointer-events-none" />
+            <input
+              ref={customerSearchRef}
+              type="text"
+              placeholder="Mijoz ismi yoki telefon raqami"
+              readOnly
+              onClick={onOpenCustomerSheet}
+              onFocus={onOpenCustomerSheet}
+              className="w-full pl-10 pr-16 py-2.5 rounded-xl border border-gray-200 bg-white text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 cursor-pointer"
+            />
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-gray-500 bg-gray-100 border border-gray-200 rounded-md px-1.5 py-0.5">
+              Ctrl+C
+            </span>
+          </div>
+          <button
+            onClick={onOpenCustomerSheet}
+            title="Mijoz tanlash"
+            className="size-9 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center active:scale-95 transition"
+            aria-label="Mijoz tanlash"
+          >
+            <ScanLine className="size-4" />
+          </button>
+          <button
+            onClick={onOpenNewCustomer}
+            title="Yangi mijoz qo'shish"
+            className="size-9 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center active:scale-95 transition"
+            aria-label="Yangi mijoz"
+          >
+            <UserPlus className="size-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Customer card — when picked */}
+      {customer && (
+        <div className="px-3 sm:px-4 pb-2 shrink-0">
+          <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="size-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                <User className="size-4 text-blue-600" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900 truncate">{customer.name}</p>
+                <p className="text-[11px] text-gray-500 truncate">{customer.phone || "Telefon yo'q"}</p>
+              </div>
+            </div>
+            <button
+              onClick={onClearCustomer}
+              className="p-1 hover:bg-blue-200 rounded-lg active:scale-95"
+              aria-label="Mijozni olib tashlash"
+            >
+              <X className="size-4 text-blue-700" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Balance */}
+      <div className="px-3 sm:px-4 pb-2 shrink-0">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-sm text-gray-700">Balans:</span>
+          <div className="flex-1" />
+          <span className={`text-sm font-bold tabular-nums ${customerBalance > 0 ? "text-red-600" : "text-gray-700"}`}>
+            {formatUZS(customerBalance)}
+          </span>
+          <Info className="size-3.5 text-gray-400" />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wide font-bold text-gray-500">Jami</p>
+            <p className="text-base font-bold text-gray-900 tabular-nums">{formatUZS(netTotal)}</p>
+          </div>
+          <div className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wide font-bold text-gray-500">Qoldiq</p>
+            <p className="text-base font-bold text-gray-900 tabular-nums">{formatUZS(netTotal)}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Spacer */}
+      <div className="flex-1 overflow-y-auto px-3 sm:px-4">
+        {validRows > 0 && (
+          <div className="bg-gray-50 rounded-xl p-3 mt-1 space-y-1">
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500">Mahsulotlar</span>
+              <span className="font-semibold text-gray-900 tabular-nums">{validRows} ta · {totalQty} dona</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500">Oraliq summa</span>
+              <span className="font-semibold text-gray-900 tabular-nums">{formatUZS(subtotal)}</span>
+            </div>
+            {discountAmount > 0 && (
+              <div className="flex justify-between text-xs text-amber-700">
+                <span>Chegirma</span>
+                <span className="font-semibold tabular-nums">−{formatUZS(discountAmount)}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Payment buttons */}
+      <div className="px-3 sm:px-4 py-2 space-y-2 shrink-0 border-t border-gray-100">
+        <div className="grid grid-cols-2 gap-2">
+          <PayButton
+            label="Naqd"
+            shortcut="F6"
+            disabled={!canFinalize}
+            onClick={() => onPay("naqd")}
+          />
+          <PayButton
+            label="Pul o'tkazish"
+            shortcut="F7"
+            disabled={!canFinalize}
+            onClick={() => onPay("pul_otkazish")}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <PayButton
+            label="Muddatli to'lov"
+            shortcut="Ctrl+I"
+            disabled={!canFinalize || !customer}
+            disabledReason={!customer ? "Mijoz kerak" : undefined}
+            onClick={() => setShowDueDate(true)}
+            muted
+          />
+          <PayButton
+            label="Qarz"
+            shortcut="Ctrl+K"
+            disabled={!canFinalize || !customer}
+            disabledReason={!customer ? "Mijoz kerak" : undefined}
+            onClick={() => onPay("qarz")}
+            muted
+          />
+        </div>
+
+        {/* Muddatli date picker */}
+        {showDueDate && (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+            <p className="text-xs font-bold text-amber-700">Muddatli to&apos;lov sanasini tanlang:</p>
+            <input
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setShowDueDate(false); setDueDate(""); }}
+                className="flex-1 px-3 py-2 rounded-lg border border-amber-300 text-amber-700 text-sm font-bold hover:bg-amber-100"
+              >
+                Bekor qilish
+              </button>
+              <button
+                onClick={() => { onPay("muddatli", { nasiyaDueDate: dueDate || undefined }); setShowDueDate(false); }}
+                disabled={submitting}
+                className="flex-1 px-3 py-2 rounded-lg bg-amber-600 text-white text-sm font-bold hover:bg-amber-700 disabled:opacity-50"
+              >
+                Tasdiqlash
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Discount row */}
+        <div className="flex items-center justify-between bg-blue-50/50 border border-blue-100 rounded-xl px-3 py-2">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-medium text-gray-700">Umumiy chegirma</span>
+            <span className="text-[10px] font-bold text-gray-500 bg-white border border-gray-200 rounded-md px-1.5 py-0.5">Ctrl+D</span>
+          </div>
+          <button
+            onClick={() => setShowDiscount((v) => !v)}
+            className={`size-7 rounded-full border-2 flex items-center justify-center active:scale-95 transition ${
+              showDiscount ? "border-blue-500 bg-blue-500 text-white" : "border-gray-300 hover:border-blue-400 text-gray-500"
+            }`}
+            aria-label={showDiscount ? "Yashirish" : "Ko'rsatish"}
+          >
+            {showDiscount ? <Minus className="size-3.5" /> : <Plus className="size-3.5" />}
+          </button>
+        </div>
+        {showDiscount && (
+          <div className="flex items-center gap-2 bg-blue-50/30 border border-blue-100 rounded-xl px-3 py-2">
+            <div className="flex bg-white border border-gray-200 rounded-lg p-0.5">
+              <button
+                onClick={() => onChangeDiscount({ type: "pct", value: discount.value })}
+                className={`px-2 py-1 rounded-md text-xs font-bold ${
+                  discount.type === "pct" ? "bg-blue-500 text-white" : "text-gray-500 hover:bg-gray-50"
+                }`}
+              >%</button>
+              <button
+                onClick={() => onChangeDiscount({ type: "abs", value: discount.value })}
+                className={`px-2 py-1 rounded-md text-xs font-bold ${
+                  discount.type === "abs" ? "bg-blue-500 text-white" : "text-gray-500 hover:bg-gray-50"
+                }`}
+              >so&apos;m</button>
+            </div>
+            <input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              max={discount.type === "pct" ? 100 : subtotal}
+              placeholder="0"
+              value={discount.value || ""}
+              onChange={(e) => onChangeDiscount({ type: discount.type, value: Math.max(0, parseFloat(e.target.value) || 0) })}
+              className="flex-1 px-2 py-1.5 rounded-md border border-gray-200 bg-white text-sm tabular-nums outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            />
+            <span className="text-xs font-bold text-amber-700 tabular-nums">−{formatNumber(discountAmount)}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Bottom action bar (Yangi / Yakunlash) */}
+      <div className="grid grid-cols-2 border-t border-gray-200 shrink-0 pb-[env(safe-area-inset-bottom)]">
+        <button
+          onClick={onReset}
+          disabled={submitting || cartLen === 0}
+          className="py-3.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed active:bg-blue-200 transition"
+        >
+          Yangi
+        </button>
+        <button
+          onClick={() => onPay("naqd")}
+          disabled={!canFinalize}
+          className="py-3.5 bg-blue-100 hover:bg-blue-200 text-blue-900 font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed active:bg-blue-300 transition"
+        >
+          {submitting ? "Saqlanmoqda..." : "Yakunlash"}
+          <span className="text-[10px] font-bold bg-white border border-blue-200 rounded-md px-1.5 py-0.5">Ctrl+⏎</span>
+        </button>
+      </div>
+    </>
+  );
+}
+
+function PayButton({
+  label,
+  shortcut,
+  disabled,
+  onClick,
+  muted,
+  disabledReason,
+}: {
+  label: string;
+  shortcut: string;
+  disabled: boolean;
+  onClick: () => void;
+  muted?: boolean;
+  disabledReason?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={disabled && disabledReason ? disabledReason : label}
+      className={`flex items-center justify-between px-3 py-2.5 rounded-xl border text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.99] transition ${
+        muted
+          ? "border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"
+          : "border-gray-200 bg-white text-gray-900 hover:bg-gray-50 hover:border-gray-300"
+      }`}
+    >
+      <span>{label}</span>
+      <span className="text-[10px] font-bold text-gray-500 bg-gray-100 border border-gray-200 rounded-md px-1.5 py-0.5">{shortcut}</span>
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Footer info bar
+// ─────────────────────────────────────────────────────────────
+function FooterBar({ sellerName }: { sellerName: string }) {
+  return (
+    <div className="hidden lg:grid grid-cols-4 bg-gray-100 border-t border-gray-200 text-[11px] text-gray-700 px-5 py-2.5">
+      <div className="flex items-center gap-2">
+        <span className="text-gray-500">Filial:</span>
+        <span className="font-bold text-gray-900">MegaHome</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-gray-500">Ombor:</span>
+        <span className="font-bold text-gray-900">Asosiy</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-gray-500">Narx:</span>
+        <span className="font-bold text-gray-900">Chakana</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-gray-500">Sotuvchi:</span>
+        <span className="font-bold text-gray-900 truncate">{sellerName}</span>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Three-dot more menu
+// ─────────────────────────────────────────────────────────────
+function MoreMenu({ onClose }: { onClose: () => void }) {
+  const items = [
+    { icon: Package, label: "Ombor" },
+    { icon: ReceiptText, label: "Onlayn to'lovlar" },
+    { icon: PercentCircle, label: "Narx" },
+    { icon: HandCoins, label: "Pul birligi" },
+    { icon: ArrowLeftRight, label: "Ayirboshlash qiymatlari" },
+    { icon: ReceiptText, label: "Qo'shimcha xarajatlar", highlight: true },
+  ];
+  return (
+    <div className="absolute right-0 top-11 w-72 bg-white border border-gray-200 rounded-xl shadow-xl py-1.5 z-50">
+      {items.map((it) => (
+        <button
+          key={it.label}
+          onClick={() => onClose()}
+          className={`w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-gray-50 transition ${
+            it.highlight ? "bg-blue-50 text-blue-700" : "text-gray-700"
+          }`}
+        >
+          <span className={`size-7 rounded-full flex items-center justify-center ${it.highlight ? "bg-blue-100" : "bg-blue-50"}`}>
+            <it.icon className={`size-3.5 ${it.highlight ? "text-blue-700" : "text-blue-500"}`} />
+          </span>
+          {it.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Customer picker sheet
+// ─────────────────────────────────────────────────────────────
 function CustomerPickerSheet({
   users,
   balanceByUid,
   onPick,
-  onPickAndRepeat,
+  onAddNew,
   onClose,
 }: {
   users: UserData[];
   balanceByUid: Map<string, number>;
   onPick: (u: UserData) => void;
-  onPickAndRepeat: (u: UserData) => void;
+  onAddNew: () => void;
   onClose: () => void;
 }) {
   const [q, setQ] = useState("");
@@ -683,6 +1223,9 @@ function CustomerPickerSheet({
         <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2 relative">
           <div className="sm:hidden h-1 w-10 bg-gray-300 rounded-full absolute top-2 left-1/2 -translate-x-1/2" aria-hidden />
           <h3 className="text-base font-bold text-gray-900 flex-1">Mijoz tanlash</h3>
+          <button onClick={onAddNew} className="text-xs font-bold text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg flex items-center gap-1">
+            <UserPlus className="size-3.5" /> Yangi
+          </button>
           <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg" aria-label="Yopish">
             <X className="size-5 text-gray-500" />
           </button>
@@ -708,38 +1251,24 @@ function CustomerPickerSheet({
               {filtered.map((u) => {
                 const bal = balanceByUid.get(u.uid) ?? 0;
                 return (
-                  <div
+                  <button
                     key={u.uid}
-                    className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl p-2 hover:border-blue-300"
+                    onClick={() => onPick(u)}
+                    className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-2 hover:border-blue-300 active:scale-[0.99] transition text-left"
                   >
-                    <button
-                      onClick={() => onPick(u)}
-                      className="flex items-center gap-3 flex-1 min-w-0 text-left"
-                    >
-                      <div className="size-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
-                        <User className="size-5 text-blue-500" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-gray-900 truncate">{u.name}</p>
-                        <p className="text-[11px] text-gray-500 flex items-center gap-1 truncate">
-                          <Phone className="size-3 shrink-0" />
-                          {u.phone || "telefon yoʻq"}
-                        </p>
-                      </div>
-                      {bal > 0 && (
-                        <span className="text-[11px] font-bold text-red-600 bg-red-50 border border-red-200 rounded-md px-1.5 py-0.5 shrink-0">
-                          {formatNumber(bal)}
-                        </span>
-                      )}
-                    </button>
-                    <button
-                      onClick={() => onPickAndRepeat(u)}
-                      title="Tanlab oxirgi buyurtmani qaytarish"
-                      className="shrink-0 p-2 rounded-lg hover:bg-amber-50 text-amber-600 active:scale-95 transition"
-                    >
-                      <RotateCcw className="size-4" />
-                    </button>
-                  </div>
+                    <div className="size-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
+                      <User className="size-5 text-blue-500" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{u.name}</p>
+                      <p className="text-[11px] text-gray-500 truncate">{u.phone || "telefon yo'q"}</p>
+                    </div>
+                    {bal > 0 && (
+                      <span className="text-[11px] font-bold text-red-600 bg-red-50 border border-red-200 rounded-md px-1.5 py-0.5 shrink-0">
+                        {formatNumber(bal)}
+                      </span>
+                    )}
+                  </button>
                 );
               })}
             </div>
@@ -751,460 +1280,270 @@ function CustomerPickerSheet({
 }
 
 // ─────────────────────────────────────────────────────────────
-// Cart sheet (expanded cart with line editing)
+// Yangi mijoz modal — bito clone
 // ─────────────────────────────────────────────────────────────
-
-function CartSheet({
-  cart,
-  subtotal,
-  discount,
-  discountAmount,
-  netTotal,
-  onIncQty,
-  onSetQty,
-  onRemove,
-  onChangeDiscount,
+function NewCustomerModal({
   onClose,
-  onCharge,
+  onCreated,
 }: {
-  cart: CartLine[];
-  subtotal: number;
-  discount: { type: "pct" | "abs"; value: number };
-  discountAmount: number;
-  netTotal: number;
-  onIncQty: (productId: string, delta: number) => void;
-  onSetQty: (productId: string, qty: number) => void;
-  onRemove: (productId: string) => void;
-  onChangeDiscount: (d: { type: "pct" | "abs"; value: number }) => void;
   onClose: () => void;
-  onCharge: () => void;
+  onCreated: (u: UserData) => void;
 }) {
+  const [type, setType] = useState<"jismoniy" | "yuridik">("jismoniy");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!name.trim()) {
+      toast.error("Mijoz ismini kiriting");
+      return;
+    }
+    setSaving(true);
+    try {
+      // Create a partial user record (no Firebase Auth — just a Firestore lead).
+      // For full auth/login, customer signs up themselves via /sign-up.
+      // POS-created customers are picked up by uid in subsequent sales.
+      const docRef = await addDoc(collection(fireDB, "user"), {
+        name: name.trim(),
+        phone: phone ? `+998${phone.replace(/\D/g, "")}` : "",
+        email: null,
+        role: "user",
+        time: serverTimestamp(),
+        date: new Date().toLocaleDateString("uz-UZ"),
+        customerType: type,
+        createdViaPos: true,
+      });
+      const newUser: UserData = {
+        uid: docRef.id,
+        name: name.trim(),
+        phone: phone ? `+998${phone.replace(/\D/g, "")}` : "",
+        email: null,
+        role: "user",
+        time: Date.now(),
+        date: new Date().toLocaleDateString("uz-UZ"),
+      };
+      toast.success("Mijoz qo'shildi");
+      onCreated(newUser);
+    } catch (err) {
+      console.error(err);
+      toast.error("Mijoz qo'shilmadi");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative bg-white w-full sm:max-w-lg sm:mb-4 sm:rounded-2xl rounded-t-3xl shadow-2xl max-h-[92vh] flex flex-col">
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2 relative">
-          <div className="sm:hidden h-1 w-10 bg-gray-300 rounded-full absolute top-2 left-1/2 -translate-x-1/2" aria-hidden />
-          <ShoppingCart className="size-5 text-gray-700" />
-          <h3 className="text-base font-bold text-gray-900 flex-1">Savat ({cart.length})</h3>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg" aria-label="Yopish">
-            <ChevronDown className="size-5 text-gray-500" />
-          </button>
-        </div>
+      <div className="relative bg-white rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl">
+        <button onClick={onClose} className="absolute top-3 right-3 p-1 hover:bg-gray-100 rounded-lg" aria-label="Yopish">
+          <X className="size-5 text-gray-400" />
+        </button>
+        <h2 className="text-2xl font-bold text-gray-900 text-center mb-5">Yangi mijoz</h2>
 
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-          {cart.map(({ product, quantity }) => {
-            const stockNum = typeof product.stock === "number" ? product.stock : 0;
-            const overstock = quantity > stockNum;
-            return (
-              <div key={product.id} className="flex items-center gap-2 bg-gray-50 rounded-xl p-2">
-                <div className="relative size-12 rounded-lg bg-white border border-gray-100 overflow-hidden shrink-0">
-                  {product.productImageUrl?.[0]?.url ? (
-                    <Image
-                      src={product.productImageUrl[0].url}
-                      alt={product.title}
-                      fill
-                      className="object-cover"
-                      sizes="48px"
-                    />
-                  ) : (
-                    <div className="size-full flex items-center justify-center">
-                      <Package className="size-4 text-gray-300" />
-                    </div>
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-gray-900 line-clamp-1">{product.title}</p>
-                  <p className="text-[11px] text-gray-500">
-                    {formatUZS(product.price)} × {quantity} = <span className="font-bold text-gray-900">{formatUZS(Number(product.price) * quantity)}</span>
-                  </p>
-                  {overstock && (
-                    <p className="text-[10px] text-amber-600 flex items-center gap-1 mt-0.5">
-                      <AlertCircle className="size-3" />
-                      Omborda atigi {stockNum} dona
-                    </p>
-                  )}
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    onClick={() => onIncQty(product.id, -1)}
-                    className="size-8 rounded-lg bg-white border border-gray-200 hover:bg-gray-100 flex items-center justify-center active:scale-95"
-                  >
-                    <Minus className="size-3.5 text-gray-700" />
-                  </button>
-                  <input
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={quantity}
-                    onChange={(e) => onSetQty(product.id, parseInt(e.target.value) || 0)}
-                    className="w-12 text-center text-sm font-bold text-gray-900 tabular-nums bg-white border border-gray-200 rounded-lg py-1 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                  />
-                  <button
-                    onClick={() => onIncQty(product.id, 1)}
-                    className="size-8 rounded-lg bg-blue-500 hover:bg-blue-600 flex items-center justify-center active:scale-95"
-                  >
-                    <Plus className="size-3.5 text-white" />
-                  </button>
-                  <button
-                    onClick={() => onRemove(product.id)}
-                    className="ml-1 size-8 rounded-lg hover:bg-red-50 flex items-center justify-center active:scale-95"
-                    aria-label="Olib tashlash"
-                  >
-                    <Trash2 className="size-3.5 text-red-500" />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Discount */}
-        <div className="px-4 py-3 border-t border-gray-100 space-y-2">
-          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Chegirma</p>
-          <div className="flex items-center gap-2">
-            <div className="flex bg-gray-100 rounded-lg p-0.5">
-              <button
-                onClick={() => onChangeDiscount({ type: "pct", value: discount.value })}
-                className={`px-3 py-1.5 rounded-md text-xs font-bold transition ${
-                  discount.type === "pct" ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
-                }`}
-              >
-                %
-              </button>
-              <button
-                onClick={() => onChangeDiscount({ type: "abs", value: discount.value })}
-                className={`px-3 py-1.5 rounded-md text-xs font-bold transition ${
-                  discount.type === "abs" ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
-                }`}
-              >
-                soʻm
-              </button>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-gray-700 mb-2">
+              <span className="text-red-500">*</span> Turi
+            </label>
+            <div className="flex items-center gap-6">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  checked={type === "jismoniy"}
+                  onChange={() => setType("jismoniy")}
+                  className="size-4 accent-blue-500 cursor-pointer"
+                />
+                <span className={`text-sm ${type === "jismoniy" ? "text-blue-600 font-bold" : "text-gray-700"}`}>Jismoniy</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  checked={type === "yuridik"}
+                  onChange={() => setType("yuridik")}
+                  className="size-4 accent-blue-500 cursor-pointer"
+                />
+                <span className={`text-sm ${type === "yuridik" ? "text-blue-600 font-bold" : "text-gray-700"}`}>Yuridik</span>
+              </label>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-700 mb-2">
+              <span className="text-red-500">*</span> Mijoz ismi
+            </label>
             <input
-              type="number"
-              inputMode="decimal"
-              min={0}
-              max={discount.type === "pct" ? 100 : subtotal}
-              placeholder="0"
-              value={discount.value || ""}
-              onChange={(e) =>
-                onChangeDiscount({ type: discount.type, value: Math.max(0, parseFloat(e.target.value) || 0) })
-              }
-              className="flex-1 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              type="text"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full px-4 py-2.5 rounded-lg border border-blue-300 bg-white text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
-            <span className="text-sm font-bold text-gray-700 tabular-nums">−{formatUZS(discountAmount)}</span>
           </div>
-        </div>
 
-        {/* Totals */}
-        <div className="px-4 py-3 border-t border-gray-100 space-y-1">
-          <div className="flex justify-between text-sm text-gray-600">
-            <span>Oraliq summa</span>
-            <span className="tabular-nums">{formatUZS(subtotal)}</span>
-          </div>
-          {discountAmount > 0 && (
-            <div className="flex justify-between text-sm text-amber-700">
-              <span>Chegirma</span>
-              <span className="tabular-nums">−{formatUZS(discountAmount)}</span>
+          <div>
+            <label className="block text-sm text-gray-700 mb-2">Telefon raqami</label>
+            <div className="flex">
+              <div className="px-3 py-2.5 border border-gray-200 rounded-l-lg bg-gray-50 flex items-center gap-2">
+                <span className="text-base">🇺🇿</span>
+                <span className="text-sm font-bold text-gray-700">+998</span>
+              </div>
+              <input
+                type="tel"
+                inputMode="tel"
+                placeholder="01-345-7890"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value.replace(/[^0-9-]/g, ""))}
+                className="flex-1 px-4 py-2.5 rounded-r-lg border border-l-0 border-gray-200 bg-white text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              />
             </div>
-          )}
-          <div className="flex justify-between text-base font-extrabold text-gray-900 pt-1">
-            <span>JAMI</span>
-            <span className="tabular-nums">{formatUZS(netTotal)}</span>
           </div>
         </div>
 
-        {/* Charge button */}
-        <div className="px-4 pb-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-          <Button
-            onClick={onCharge}
-            className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 text-white text-base font-bold rounded-xl"
-          >
-            TOʻLOV {formatUZS(netTotal)}
-          </Button>
-        </div>
+        <Button
+          onClick={handleSave}
+          disabled={saving || !name.trim()}
+          className="w-full mt-6 h-12 bg-blue-500 hover:bg-blue-600 text-white text-base font-bold rounded-xl disabled:opacity-50"
+        >
+          {saving ? "Saqlanmoqda..." : "Saqlash"}
+        </Button>
       </div>
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────
-// Tender sheet (cash / nasiya / mixed)
+// Mas'ul shaxs modal
 // ─────────────────────────────────────────────────────────────
-
-function TenderSheet({
-  netTotal,
-  customer,
-  customerBalance,
-  submitting,
-  onCancel,
-  onCommit,
+function ResponsibleModal({
+  users,
+  current,
+  note,
+  onSave,
+  onClose,
 }: {
-  netTotal: number;
-  customer: UserData | null;
-  customerBalance: number;
-  submitting: boolean;
-  onCancel: () => void;
-  onCommit: (tender: Tender) => void;
+  users: UserData[];
+  current: UserData | null;
+  note: string;
+  onSave: (u: UserData | null, note: string) => void;
+  onClose: () => void;
 }) {
-  const [mode, setMode] = useState<"naqd" | "nasiya" | "aralash">(customer ? "nasiya" : "naqd");
-  const [cashGiven, setCashGiven] = useState<number>(netTotal); // for "naqd" mode
-  const [mixCash, setMixCash] = useState<number>(0);
-  const [dueDate, setDueDate] = useState<string>("");
-
-  // Update mode default when customer presence changes
-  useEffect(() => {
-    if (!customer && mode === "nasiya") setMode("naqd");
-  }, [customer, mode]);
-
-  // Reset cashGiven if netTotal changes (rare during tender, but defensive)
-  useEffect(() => {
-    if (mode === "naqd") setCashGiven(netTotal);
-    if (mode === "aralash") setMixCash(Math.max(0, Math.min(mixCash, netTotal)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [netTotal, mode]);
-
-  const change = Math.max(0, cashGiven - netTotal);
-  const mixNasiya = Math.max(0, netTotal - mixCash);
-
-  const canCommit = useMemo(() => {
-    if (submitting) return false;
-    if (mode === "naqd") return cashGiven >= netTotal;
-    if (mode === "nasiya") return !!customer && netTotal > 0;
-    if (mode === "aralash") {
-      if (!customer) return false;
-      if (mixCash <= 0 || mixCash >= netTotal) return false;
-      return true;
-    }
-    return false;
-  }, [mode, customer, cashGiven, netTotal, mixCash, submitting]);
-
-  const commit = () => {
-    if (!canCommit) return;
-    if (mode === "naqd") {
-      onCommit({ cash: netTotal, nasiya: 0 });
-    } else if (mode === "nasiya") {
-      onCommit({ cash: 0, nasiya: netTotal, nasiyaDueDate: dueDate || undefined });
-    } else {
-      onCommit({ cash: mixCash, nasiya: mixNasiya, nasiyaDueDate: dueDate || undefined });
-    }
-  };
-
-  const quickAmounts = useMemo(() => {
-    const round = (n: number) => Math.ceil(n / 1000) * 1000;
-    const a = round(netTotal);
-    const b = Math.ceil(netTotal / 5000) * 5000;
-    const c = Math.ceil(netTotal / 10000) * 10000;
-    const d = Math.ceil(netTotal / 50000) * 50000;
-    const out = Array.from(new Set([a, b, c, d])).filter((x) => x >= netTotal).sort((x, y) => x - y).slice(0, 4);
-    return out;
-  }, [netTotal]);
+  const staff = useMemo(() => users.filter((u) => u.role === "admin" || u.role === "manager"), [users]);
+  const [selected, setSelected] = useState<UserData | null>(current);
+  const [n, setN] = useState(note);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center">
-      <div className="absolute inset-0 bg-black/70" onClick={onCancel} />
-      <div className="relative bg-white w-full sm:max-w-lg sm:mb-4 sm:rounded-2xl rounded-t-3xl shadow-2xl max-h-[95vh] flex flex-col">
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2 relative">
-          <div className="sm:hidden h-1 w-10 bg-gray-300 rounded-full absolute top-2 left-1/2 -translate-x-1/2" aria-hidden />
-          <Receipt className="size-5 text-gray-700" />
-          <h3 className="text-base font-bold text-gray-900 flex-1">Toʻlov</h3>
-          <button onClick={onCancel} className="p-1 hover:bg-gray-100 rounded-lg" aria-label="Yopish" disabled={submitting}>
-            <X className="size-5 text-gray-500" />
-          </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl">
+        <button onClick={onClose} className="absolute top-3 right-3 p-1 hover:bg-gray-100 rounded-lg" aria-label="Yopish">
+          <X className="size-5 text-gray-400" />
+        </button>
+        <h2 className="text-2xl font-bold text-gray-900 text-center mb-5">Mas&apos;ul shaxs</h2>
+
+        <div className="space-y-3">
+          <select
+            value={selected?.uid ?? ""}
+            onChange={(e) => setSelected(staff.find((u) => u.uid === e.target.value) ?? null)}
+            className="w-full px-4 py-3 rounded-lg border border-gray-200 bg-white text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 cursor-pointer"
+          >
+            <option value="">— Tanlanmagan —</option>
+            {staff.map((u) => (
+              <option key={u.uid} value={u.uid}>
+                {u.name}
+              </option>
+            ))}
+          </select>
+
+          <input
+            type="text"
+            placeholder="Izoh kiriting"
+            value={n}
+            onChange={(e) => setN(e.target.value)}
+            className="w-full px-4 py-3 rounded-lg border border-gray-200 bg-white text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+          />
         </div>
 
-        <div className="px-4 py-4 border-b border-gray-100">
-          <p className="text-[11px] uppercase tracking-wide font-bold text-gray-500 mb-1">Toʻlanadigan summa</p>
-          <p className="text-3xl font-extrabold text-gray-900 tabular-nums">{formatUZS(netTotal)}</p>
-          {customer && (
-            <p className="text-xs text-gray-500 mt-1">
-              {customer.name}
-              {customerBalance > 0 && (
-                <span className="ml-2 text-red-600 font-bold">Joriy qarz: {formatNumber(customerBalance)}</span>
-              )}
-            </p>
-          )}
-        </div>
+        <Button
+          onClick={() => onSave(selected, n)}
+          className="w-full mt-6 h-12 bg-blue-500 hover:bg-blue-600 text-white text-base font-bold rounded-xl"
+        >
+          Saqlash va yopish
+        </Button>
+      </div>
+    </div>
+  );
+}
 
-        {/* Method tabs */}
-        <div className="px-4 pt-3">
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              onClick={() => setMode("naqd")}
-              className={`flex flex-col items-center gap-1 rounded-xl border-2 p-3 transition ${
-                mode === "naqd"
-                  ? "border-emerald-500 bg-emerald-50"
-                  : "border-gray-200 bg-white hover:bg-gray-50"
-              }`}
-            >
-              <Wallet className={`size-5 ${mode === "naqd" ? "text-emerald-600" : "text-gray-500"}`} />
-              <span className={`text-xs font-bold ${mode === "naqd" ? "text-emerald-700" : "text-gray-700"}`}>
-                Naqd
-              </span>
-            </button>
-            <button
-              onClick={() => customer && setMode("nasiya")}
-              disabled={!customer}
-              className={`flex flex-col items-center gap-1 rounded-xl border-2 p-3 transition ${
-                mode === "nasiya"
-                  ? "border-amber-500 bg-amber-50"
-                  : "border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              }`}
-            >
-              <Clock3 className={`size-5 ${mode === "nasiya" ? "text-amber-600" : "text-gray-500"}`} />
-              <span className={`text-xs font-bold ${mode === "nasiya" ? "text-amber-700" : "text-gray-700"}`}>
-                Nasiya
-              </span>
-            </button>
-            <button
-              onClick={() => customer && setMode("aralash")}
-              disabled={!customer}
-              className={`flex flex-col items-center gap-1 rounded-xl border-2 p-3 transition ${
-                mode === "aralash"
-                  ? "border-blue-500 bg-blue-50"
-                  : "border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              }`}
-            >
-              <Layers className={`size-5 ${mode === "aralash" ? "text-blue-600" : "text-gray-500"}`} />
-              <span className={`text-xs font-bold ${mode === "aralash" ? "text-blue-700" : "text-gray-700"}`}>
-                Aralash
-              </span>
-            </button>
+// ─────────────────────────────────────────────────────────────
+// Product picker dropdown (overlays under the search bar)
+// ─────────────────────────────────────────────────────────────
+function ProductPickerDropdown({
+  results,
+  search,
+  onPick,
+  onClose,
+  cart,
+}: {
+  results: ProductT[];
+  search: string;
+  onPick: (p: ProductT) => void;
+  onClose: () => void;
+  cart: CartLine[];
+}) {
+  // Only show when there's a search OR no results
+  if (results.length === 0 && search.length === 0) return null;
+
+  return (
+    <div className="fixed inset-0 z-40 lg:absolute lg:inset-auto" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/30 lg:hidden" />
+      <div
+        className="absolute top-[120px] left-3 right-3 lg:left-1/2 lg:-translate-x-1/2 lg:top-[124px] lg:max-w-2xl lg:w-[calc(100%-2rem)] bg-white rounded-xl shadow-2xl border border-gray-200 max-h-[70vh] overflow-y-auto z-50"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {results.length === 0 ? (
+          <p className="p-8 text-center text-sm text-gray-400">Mahsulot topilmadi</p>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {results.slice(0, 30).map((p) => {
+              const inCart = cart.some((l) => l.product.id === p.id);
+              const stockNum = typeof p.stock === "number" ? p.stock : 0;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => onPick(p)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:bg-gray-100 transition text-left"
+                >
+                  <div className="relative size-12 rounded-lg bg-gray-100 overflow-hidden shrink-0">
+                    {p.productImageUrl?.[0]?.url ? (
+                      <Image src={p.productImageUrl[0].url} alt={p.title} fill className="object-cover" sizes="48px" />
+                    ) : (
+                      <div className="size-full flex items-center justify-center"><Package className="size-5 text-gray-300" /></div>
+                    )}
+                    {inCart && (
+                      <div className="absolute top-0.5 right-0.5 size-4 rounded-full bg-blue-500 flex items-center justify-center">
+                        <Check className="size-2.5 text-white" strokeWidth={3} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{p.title}</p>
+                    <p className="text-xs text-gray-500">
+                      <span className="text-gray-700 font-medium">{formatUZS(p.price)}</span>
+                      <span className={`ml-2 text-[11px] font-bold ${stockNum <= 0 ? "text-red-500" : stockNum < 5 ? "text-amber-600" : "text-emerald-600"}`}>
+                        {stockNum > 0 ? `${stockNum} dona` : "tugagan"}
+                      </span>
+                    </p>
+                  </div>
+                  <div className="size-9 rounded-full bg-blue-500 hover:bg-blue-600 flex items-center justify-center shrink-0 shadow-sm shadow-blue-500/30">
+                    <Plus className="size-4 text-white" />
+                  </div>
+                </button>
+              );
+            })}
           </div>
-          {!customer && (
-            <p className="text-[11px] text-gray-500 mt-2 flex items-center gap-1">
-              <AlertCircle className="size-3 shrink-0" />
-              Nasiya / aralash uchun mijoz kerak
-            </p>
-          )}
-        </div>
-
-        {/* Inputs by mode */}
-        <div className="flex-1 overflow-y-auto px-4 py-4">
-          {mode === "naqd" && (
-            <div className="space-y-3">
-              <div>
-                <label className="text-[11px] uppercase tracking-wide font-bold text-gray-500 mb-1 block">
-                  Naqd berildi
-                </label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min={netTotal}
-                  value={cashGiven || ""}
-                  onChange={(e) => setCashGiven(Math.max(0, parseFloat(e.target.value) || 0))}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-lg font-bold tabular-nums outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-                />
-              </div>
-              <div className="grid grid-cols-4 gap-2">
-                {quickAmounts.map((amt) => (
-                  <button
-                    key={amt}
-                    onClick={() => setCashGiven(amt)}
-                    className="rounded-lg border border-gray-200 bg-white hover:bg-gray-50 px-2 py-2 text-xs font-bold text-gray-700 active:scale-95 transition tabular-nums"
-                  >
-                    {formatNumber(amt)}
-                  </button>
-                ))}
-              </div>
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5 flex items-center justify-between">
-                <span className="text-xs font-bold text-emerald-700 uppercase tracking-wide">Qaytim</span>
-                <span className="text-lg font-extrabold text-emerald-700 tabular-nums">{formatUZS(change)}</span>
-              </div>
-            </div>
-          )}
-
-          {mode === "nasiya" && customer && (
-            <div className="space-y-3">
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-1">
-                <p className="text-[11px] uppercase tracking-wide font-bold text-amber-700">
-                  Mijoz qarziga qoʻshiladi
-                </p>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-xs text-amber-700">Hozirgi qarz</span>
-                  <span className="text-sm font-bold text-amber-900 tabular-nums">{formatUZS(customerBalance)}</span>
-                </div>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-xs text-amber-700">Bu sotuv</span>
-                  <span className="text-sm font-bold text-amber-900 tabular-nums">+{formatUZS(netTotal)}</span>
-                </div>
-                <div className="border-t border-amber-200 pt-1.5 flex items-baseline justify-between">
-                  <span className="text-xs font-bold text-amber-800">Yangi qarz</span>
-                  <span className="text-base font-extrabold text-red-700 tabular-nums">
-                    {formatUZS(customerBalance + netTotal)}
-                  </span>
-                </div>
-              </div>
-              <div>
-                <label className="text-[11px] uppercase tracking-wide font-bold text-gray-500 mb-1 block">
-                  Toʻlash muddati (ixtiyoriy)
-                </label>
-                <input
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
-                />
-              </div>
-            </div>
-          )}
-
-          {mode === "aralash" && customer && (
-            <div className="space-y-3">
-              <div>
-                <label className="text-[11px] uppercase tracking-wide font-bold text-emerald-700 mb-1 block">
-                  Naqd qismi
-                </label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  max={netTotal}
-                  value={mixCash || ""}
-                  onChange={(e) =>
-                    setMixCash(Math.max(0, Math.min(parseFloat(e.target.value) || 0, netTotal)))
-                  }
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-lg font-bold tabular-nums outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-                />
-              </div>
-              <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 flex items-center justify-between">
-                <span className="text-xs font-bold text-amber-700 uppercase tracking-wide">Nasiya qismi</span>
-                <span className="text-lg font-extrabold text-amber-700 tabular-nums">{formatUZS(mixNasiya)}</span>
-              </div>
-              {mixNasiya > 0 && (
-                <div>
-                  <label className="text-[11px] uppercase tracking-wide font-bold text-gray-500 mb-1 block">
-                    Nasiya muddati (ixtiyoriy)
-                  </label>
-                  <input
-                    type="date"
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                  />
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="px-4 pb-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 border-t border-gray-100 flex gap-2">
-          <Button
-            variant="outline"
-            onClick={onCancel}
-            disabled={submitting}
-            className="rounded-xl"
-          >
-            Bekor qilish
-          </Button>
-          <Button
-            onClick={commit}
-            disabled={!canCommit}
-            className="flex-1 h-12 bg-emerald-600 hover:bg-emerald-700 text-white text-base font-bold rounded-xl"
-          >
-            {submitting ? "Saqlanmoqda..." : `Tasdiqlash · ${formatUZS(netTotal)}`}
-          </Button>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -1213,7 +1552,6 @@ function TenderSheet({
 // ─────────────────────────────────────────────────────────────
 // Success screen
 // ─────────────────────────────────────────────────────────────
-
 function PosSuccess({
   info,
   onNew,
@@ -1223,31 +1561,6 @@ function PosSuccess({
   onNew: () => void;
   onBack: () => void;
 }) {
-  // Build receipt text for sharing
-  const receiptText = useMemo(() => {
-    const lines = [
-      `🛒 MegaHome — Sotuv chek`,
-      ``,
-      `№ ${info.orderId.slice(0, 8).toUpperCase()}`,
-      `${info.customerName}${info.customerPhone ? ` · ${info.customerPhone}` : ""}`,
-      `${info.itemCount} ta mahsulot`,
-      ``,
-      `Jami: ${formatUZS(info.netTotal)}`,
-      info.method === "aralash"
-        ? `Toʻlov: aralash`
-        : info.method === "nasiya"
-        ? `Toʻlov: nasiya`
-        : `Toʻlov: naqd`,
-      ``,
-      `Rahmat!`,
-    ];
-    return lines.join("\n");
-  }, [info]);
-
-  const tgUrl = useMemo(() => {
-    return `https://t.me/share/url?url=${encodeURIComponent("https://www.megahome.app")}&text=${encodeURIComponent(receiptText)}`;
-  }, [receiptText]);
-
   return (
     <div className="min-h-[100dvh] bg-gradient-to-b from-emerald-50 to-white flex flex-col items-center justify-center p-4">
       <div className="bg-white rounded-3xl border border-gray-100 shadow-xl max-w-md w-full p-6 sm:p-8 text-center">
@@ -1264,44 +1577,21 @@ function PosSuccess({
           </div>
           <div className="flex justify-between">
             <span className="text-sm text-gray-600">Mahsulotlar</span>
-            <span className="text-sm font-semibold text-gray-900">{info.itemCount} ta</span>
+            <span className="text-sm font-semibold text-gray-900">{info.itemCount} dona</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-sm text-gray-600">Toʻlov turi</span>
-            <span
-              className={`text-xs font-bold uppercase rounded-md px-2 py-0.5 ${
-                info.method === "naqd"
-                  ? "bg-emerald-100 text-emerald-700"
-                  : info.method === "nasiya"
-                  ? "bg-amber-100 text-amber-700"
-                  : "bg-blue-100 text-blue-700"
-              }`}
-            >
-              {info.method}
+            <span className="text-sm text-gray-600">To&apos;lov turi</span>
+            <span className="text-xs font-bold uppercase rounded-md px-2 py-0.5 bg-blue-100 text-blue-700">
+              {info.method === "naqd" ? "Naqd" : info.method === "qarz" ? "Qarz" : info.method === "muddatli" ? "Muddatli" : "Pul o'tkazish"}
             </span>
           </div>
           <div className="border-t border-gray-200 pt-2 flex justify-between">
             <span className="text-base font-bold text-gray-900">Jami</span>
             <span className="text-base font-extrabold text-gray-900 tabular-nums">{formatUZS(info.netTotal)}</span>
           </div>
-          {info.method === "naqd" && info.cashGiven > info.netTotal && (
-            <div className="flex justify-between text-emerald-700">
-              <span className="text-sm font-bold">Qaytim</span>
-              <span className="text-sm font-extrabold tabular-nums">{formatUZS(info.cashGiven - info.netTotal)}</span>
-            </div>
-          )}
         </div>
 
         <div className="space-y-2">
-          <a
-            href={tgUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="w-full flex items-center justify-center gap-2 bg-[#0088cc] hover:bg-[#0077b5] text-white font-bold rounded-xl py-3 transition active:scale-[0.99]"
-          >
-            <Send className="size-4" />
-            Telegram orqali yuborish
-          </a>
           <Button onClick={onNew} className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 text-white text-base font-bold rounded-xl">
             Yangi sotuv
           </Button>
@@ -1313,3 +1603,6 @@ function PosSuccess({
     </div>
   );
 }
+
+// reference (silences unused import warning until cart imports lucide)
+void ShoppingCart;
