@@ -545,8 +545,8 @@ export default function PosScreen() {
       <div className="flex-1 flex overflow-hidden">
         {/* ── LEFT PANE: search + cart ──────────────────────────────── */}
         <main className="flex-1 flex flex-col overflow-hidden lg:border-r lg:border-gray-200">
-          {/* Product search (Ctrl+F) */}
-          <div className="px-3 sm:px-5 pt-3 pb-2 bg-white border-b border-gray-100 shrink-0">
+          {/* Product search (Ctrl+F) — INLINE dropdown, anchored to input */}
+          <div className="relative px-3 sm:px-5 pt-3 pb-2 bg-white border-b border-gray-100 shrink-0 z-20">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400 pointer-events-none" />
               <input
@@ -559,12 +559,108 @@ export default function PosScreen() {
                   setShowProductPicker(true);
                 }}
                 onFocus={() => setShowProductPicker(true)}
+                onBlur={() => setTimeout(() => setShowProductPicker(false), 200)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setProductSearch("");
+                    setShowProductPicker(false);
+                    (e.target as HTMLInputElement).blur();
+                  } else if (e.key === "Enter" && filteredProducts.length > 0) {
+                    e.preventDefault();
+                    addProduct(filteredProducts[0]);
+                    setProductSearch("");
+                    productSearchRef.current?.focus();
+                  }
+                }}
                 className="w-full pl-10 pr-20 py-3 rounded-xl border border-gray-200 bg-white text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
               <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-gray-500 bg-gray-100 border border-gray-200 rounded-md px-1.5 py-0.5">
                 Ctrl+F
               </span>
             </div>
+
+            {/* Inline product dropdown — anchored to search input container */}
+            {showProductPicker && (
+              <div className="absolute left-3 right-3 sm:left-5 sm:right-5 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-2xl z-30 max-h-[60vh] overflow-y-auto">
+                {filteredProducts.length === 0 ? (
+                  <div className="p-6 text-center">
+                    <Package className="size-8 mx-auto text-gray-300 mb-2" />
+                    <p className="text-sm text-gray-400">
+                      {products.length === 0
+                        ? "Mahsulotlar yuklanmoqda..."
+                        : debouncedSearch
+                        ? `"${debouncedSearch}" boʻyicha mahsulot topilmadi`
+                        : "Hech qanday mahsulot yoʻq"}
+                    </p>
+                    {products.length > 0 && debouncedSearch && (
+                      <button
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => router.push("/admin/create-product")}
+                        className="mt-3 text-xs text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg font-bold"
+                      >
+                        + Yangi mahsulot qoʻshish
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-100">
+                    <div className="px-3 py-2 bg-gray-50 sticky top-0 text-[10px] font-bold uppercase tracking-wide text-gray-500 flex items-center justify-between">
+                      <span>{debouncedSearch ? "Qidiruv natijalari" : "Mahsulotlar"}</span>
+                      <span className="text-gray-400">{filteredProducts.length} ta</span>
+                    </div>
+                    {filteredProducts.slice(0, 30).map((p) => {
+                      const inCart = cart.some((l) => l.product.id === p.id);
+                      const stockNum = typeof p.stock === "number" ? p.stock : 0;
+                      return (
+                        <button
+                          key={p.id}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            addProduct(p);
+                            setProductSearch("");
+                            productSearchRef.current?.focus();
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:bg-gray-100 transition text-left"
+                        >
+                          <div className="relative size-12 rounded-lg bg-gray-100 overflow-hidden shrink-0">
+                            {p.productImageUrl?.[0]?.url ? (
+                              <Image src={p.productImageUrl[0].url} alt={p.title} fill className="object-cover" sizes="48px" />
+                            ) : (
+                              <div className="size-full flex items-center justify-center"><Package className="size-5 text-gray-300" /></div>
+                            )}
+                            {inCart && (
+                              <div className="absolute top-0.5 right-0.5 size-4 rounded-full bg-blue-500 flex items-center justify-center">
+                                <Check className="size-2.5 text-white" strokeWidth={3} />
+                              </div>
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-gray-900 truncate">{p.title}</p>
+                            <p className="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
+                              <span className="text-gray-700 font-medium">{formatUZS(p.price)}</span>
+                              <span className={`text-[11px] font-bold ${stockNum <= 0 ? "text-red-500" : stockNum < 5 ? "text-amber-600" : "text-emerald-600"}`}>
+                                {stockNum > 0 ? `${stockNum} dona` : "tugagan"}
+                              </span>
+                              {p.category && (
+                                <span className="text-[10px] text-gray-400 hidden sm:inline">· {p.category}</span>
+                              )}
+                            </p>
+                          </div>
+                          <div className="size-9 rounded-full bg-blue-500 hover:bg-blue-600 flex items-center justify-center shrink-0 shadow-sm shadow-blue-500/30">
+                            <Plus className="size-4 text-white" />
+                          </div>
+                        </button>
+                      );
+                    })}
+                    {filteredProducts.length > 30 && (
+                      <p className="px-3 py-2 text-[11px] text-center text-gray-400">
+                        Boshqa {filteredProducts.length - 30} ta natija — qidiruvni aniqlashtiring
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Mas'ul shaxs pill row */}
@@ -769,21 +865,6 @@ export default function PosScreen() {
         />
       )}
 
-      {/* ── Product picker dropdown (results below search) ───────── */}
-      {showProductPicker && (
-        <ProductPickerDropdown
-          results={filteredProducts}
-          search={debouncedSearch}
-          onPick={(p) => {
-            addProduct(p);
-            setProductSearch("");
-            setShowProductPicker(false);
-            productSearchRef.current?.focus();
-          }}
-          onClose={() => setShowProductPicker(false)}
-          cart={cart}
-        />
-      )}
     </div>
   );
 }
@@ -1777,79 +1858,6 @@ function ResponsibleModal({
         >
           Saqlash va yopish
         </Button>
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// Product picker dropdown (overlays under the search bar)
-// ─────────────────────────────────────────────────────────────
-function ProductPickerDropdown({
-  results,
-  search,
-  onPick,
-  onClose,
-  cart,
-}: {
-  results: ProductT[];
-  search: string;
-  onPick: (p: ProductT) => void;
-  onClose: () => void;
-  cart: CartLine[];
-}) {
-  // Only show when there's a search OR no results
-  if (results.length === 0 && search.length === 0) return null;
-
-  return (
-    <div className="fixed inset-0 z-40 lg:absolute lg:inset-auto" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/30 lg:hidden" />
-      <div
-        className="absolute top-[120px] left-3 right-3 lg:left-1/2 lg:-translate-x-1/2 lg:top-[124px] lg:max-w-2xl lg:w-[calc(100%-2rem)] bg-white rounded-xl shadow-2xl border border-gray-200 max-h-[70vh] overflow-y-auto z-50"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {results.length === 0 ? (
-          <p className="p-8 text-center text-sm text-gray-400">Mahsulot topilmadi</p>
-        ) : (
-          <div className="divide-y divide-gray-100">
-            {results.slice(0, 30).map((p) => {
-              const inCart = cart.some((l) => l.product.id === p.id);
-              const stockNum = typeof p.stock === "number" ? p.stock : 0;
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => onPick(p)}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:bg-gray-100 transition text-left"
-                >
-                  <div className="relative size-12 rounded-lg bg-gray-100 overflow-hidden shrink-0">
-                    {p.productImageUrl?.[0]?.url ? (
-                      <Image src={p.productImageUrl[0].url} alt={p.title} fill className="object-cover" sizes="48px" />
-                    ) : (
-                      <div className="size-full flex items-center justify-center"><Package className="size-5 text-gray-300" /></div>
-                    )}
-                    {inCart && (
-                      <div className="absolute top-0.5 right-0.5 size-4 rounded-full bg-blue-500 flex items-center justify-center">
-                        <Check className="size-2.5 text-white" strokeWidth={3} />
-                      </div>
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{p.title}</p>
-                    <p className="text-xs text-gray-500">
-                      <span className="text-gray-700 font-medium">{formatUZS(p.price)}</span>
-                      <span className={`ml-2 text-[11px] font-bold ${stockNum <= 0 ? "text-red-500" : stockNum < 5 ? "text-amber-600" : "text-emerald-600"}`}>
-                        {stockNum > 0 ? `${stockNum} dona` : "tugagan"}
-                      </span>
-                    </p>
-                  </div>
-                  <div className="size-9 rounded-full bg-blue-500 hover:bg-blue-600 flex items-center justify-center shrink-0 shadow-sm shadow-blue-500/30">
-                    <Plus className="size-4 text-white" />
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
       </div>
     </div>
   );
