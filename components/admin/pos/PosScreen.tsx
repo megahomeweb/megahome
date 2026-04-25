@@ -26,6 +26,7 @@ import { useOrderStore } from "@/store/useOrderStore";
 import { formatUZS, formatNumber } from "@/lib/formatPrice";
 import { matchesSearch } from "@/lib/searchMatch";
 import { auth } from "@/firebase/config";
+import { getStatusInfo } from "@/lib/orderStatus";
 import type { ProductT, Order } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -141,6 +142,8 @@ export default function PosScreen() {
 
   // Product detail modal — opens when admin clicks a product (bito flow)
   const [pendingProduct, setPendingProduct] = useState<ProductT | null>(null);
+  // Cheklar (receipts) modal — opens from the receipts icon in toolbar
+  const [showCheklarModal, setShowCheklarModal] = useState(false);
 
   // ── Inline customer search (right panel) ────────────────
   const [customerQuery, setCustomerQuery] = useState("");
@@ -575,13 +578,8 @@ export default function PosScreen() {
           />
           <ToolbarIcon
             Icon={ReceiptText}
-            title="Cheklar / Buyurtmalar ro'yxati"
-            onClick={() => {
-              if (cart.length > 0) {
-                if (!window.confirm("Savatdagi mahsulotlar yoʻqoladi. Davom etamizmi?")) return;
-              }
-              router.push("/admin/orders");
-            }}
+            title="Cheklar ro'yxati"
+            onClick={() => setShowCheklarModal(true)}
           />
           <ToolbarIcon
             Icon={Undo2}
@@ -920,6 +918,20 @@ export default function PosScreen() {
           onCreated={(u) => {
             setCustomer(u);
             setShowNewCustomerModal(false);
+          }}
+        />
+      )}
+
+      {/* ── Cheklar (receipts) modal ────────────────────────── */}
+      {showCheklarModal && (
+        <CheklarModal
+          orders={orders}
+          users={users}
+          onClose={() => setShowCheklarModal(false)}
+          onPickOrder={(o) => {
+            setShowCheklarModal(false);
+            router.push(`/admin/orders`);
+            void o;
           }}
         />
       )}
@@ -1973,6 +1985,306 @@ function ResponsibleModal({
         >
           Saqlash va yopish
         </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Cheklar (Receipts) modal — bito-style receipt history viewer
+// Real order data with type / customer / date / generic search filters
+// + Bitrix-style pagination (50/page default)
+// ─────────────────────────────────────────────────────────────
+function CheklarModal({
+  orders,
+  users,
+  onClose,
+  onPickOrder,
+}: {
+  orders: Order[];
+  users: UserData[];
+  onClose: () => void;
+  onPickOrder: (o: Order) => void;
+}) {
+  const [type, setType] = useState<"savdo" | "qaytarish">("savdo");
+  const [typeOpen, setTypeOpen] = useState(false);
+  const [customerQ, setCustomerQ] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(50);
+  const typeMenuRef = useRef<HTMLDivElement>(null);
+
+  // Resolve customer display name (POS-created users come from /user;
+  // walk-in/anonymous orders use clientName fallback).
+  const customerNameFor = (o: Order): string => {
+    const u = users.find((x) => x.uid === o.userUid);
+    return u?.name || o.clientName || "Mijoz";
+  };
+
+  const filtered = useMemo(() => {
+    let list = orders;
+    // Type filter — Savdo = active sales; Qaytarish = cancelled (treated as returns for v1)
+    if (type === "savdo") {
+      list = list.filter((o) => o.status !== "bekor_qilindi");
+    } else {
+      list = list.filter((o) => o.status === "bekor_qilindi");
+    }
+    if (customerQ.trim().length >= 1) {
+      list = list.filter(
+        (o) =>
+          (o.clientName ? matchesSearch(o.clientName, customerQ) : false) ||
+          (o.clientPhone ? o.clientPhone.includes(customerQ) : false),
+      );
+    }
+    if (dateFrom) {
+      const fromTs = new Date(dateFrom).getTime() / 1000;
+      list = list.filter((o) => (o.date?.seconds ?? 0) >= fromTs);
+    }
+    if (dateTo) {
+      const toTs = new Date(dateTo).getTime() / 1000 + 86400;
+      list = list.filter((o) => (o.date?.seconds ?? 0) <= toTs);
+    }
+    if (search.trim().length >= 1) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        (o) =>
+          (o.id ? o.id.toLowerCase().includes(q) : false) ||
+          (o.clientName ? matchesSearch(o.clientName, search) : false),
+      );
+    }
+    return list.sort((a, b) => (b.date?.seconds || 0) - (a.date?.seconds || 0));
+  }, [orders, type, customerQ, dateFrom, dateTo, search]);
+
+  // Reset page on filter change
+  useEffect(() => {
+    setPage(1);
+  }, [type, customerQ, dateFrom, dateTo, search, perPage]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const start = (safePage - 1) * perPage;
+  const pageItems = filtered.slice(start, start + perPage);
+
+  // Close type dropdown on outside click
+  useEffect(() => {
+    if (!typeOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (!typeMenuRef.current?.contains(e.target as Node)) setTypeOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [typeOpen]);
+
+  // Esc closes modal
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const fmtDate = (ts: number | undefined) => {
+    if (!ts) return "—";
+    return new Date(ts * 1000).toLocaleString("uz-UZ", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative w-full h-full bg-white sm:rounded-none flex flex-col">
+        <button
+          onClick={onClose}
+          aria-label="Yopish"
+          className="absolute top-3 right-3 p-1.5 hover:bg-gray-100 rounded-lg active:scale-95 transition z-10"
+        >
+          <X className="size-5 text-gray-500" />
+        </button>
+
+        <h2 className="text-2xl font-bold text-gray-900 text-center pt-5 pb-2">Cheklar</h2>
+
+        {/* Filter row */}
+        <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-2">
+          {/* Type select */}
+          <div ref={typeMenuRef} className="relative w-full sm:w-44 shrink-0">
+            <button
+              onClick={() => setTypeOpen((v) => !v)}
+              className="w-full h-10 px-3 pr-9 rounded-lg border border-gray-200 bg-white text-sm text-left flex items-center justify-between hover:border-gray-300 transition"
+            >
+              <span className="font-medium">{type === "savdo" ? "Savdo" : "Qaytarish"}</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={`size-4 text-gray-500 transition ${typeOpen ? "rotate-180" : ""}`}>
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            {typeOpen && (
+              <div className="absolute top-11 left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-xl py-1 z-20">
+                <button
+                  onClick={() => { setType("savdo"); setTypeOpen(false); }}
+                  className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 ${
+                    type === "savdo" ? "text-blue-600 font-bold" : "text-gray-700"
+                  }`}
+                >Savdo</button>
+                <button
+                  onClick={() => { setType("qaytarish"); setTypeOpen(false); }}
+                  className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 ${
+                    type === "qaytarish" ? "text-blue-600 font-bold" : "text-gray-700"
+                  }`}
+                >Qaytarish</button>
+              </div>
+            )}
+          </div>
+
+          {/* Customer search */}
+          <input
+            type="text"
+            placeholder="Mijoz ismi yoki telefon raqami"
+            value={customerQ}
+            onChange={(e) => setCustomerQ(e.target.value)}
+            className="flex-1 min-w-[180px] h-10 px-3 rounded-lg border border-gray-200 bg-white text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+          />
+
+          {/* Date range */}
+          <div className="flex items-center gap-1 shrink-0">
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              placeholder="dan"
+              className="h-10 px-2 rounded-lg border border-gray-200 bg-white text-xs outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            />
+            <span className="text-xs text-gray-500 px-1">→</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              placeholder="gacha"
+              className="h-10 px-2 rounded-lg border border-gray-200 bg-white text-xs outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
+
+          {/* Generic search */}
+          <input
+            type="text"
+            placeholder="Search..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full sm:w-56 h-10 px-3 rounded-lg border border-gray-200 bg-white text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+          />
+        </div>
+
+        {/* Table */}
+        <div className="flex-1 overflow-auto px-4 sm:px-6">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-gray-500 border-b border-gray-200 sticky top-0 bg-white">
+                <th className="px-2 py-3 w-10">#</th>
+                <th className="px-2 py-3">Sana</th>
+                <th className="px-2 py-3">UUID</th>
+                <th className="px-2 py-3">Savdo raqami</th>
+                <th className="px-2 py-3">Holati</th>
+                <th className="px-2 py-3">Sotuvchi</th>
+                <th className="px-2 py-3">Mijoz</th>
+                <th className="px-2 py-3 text-right">Mahsulotlar soni</th>
+                <th className="px-2 py-3 text-right">Jami savdo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageItems.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="text-center py-16 text-gray-400 text-sm">No Data</td>
+                </tr>
+              ) : (
+                pageItems.map((o, i) => {
+                  const idx = (safePage - 1) * perPage + i + 1;
+                  const statusInfo = getStatusInfo(o.status);
+                  const seller = (o as Order & { sellerName?: string }).sellerName ?? "—";
+                  return (
+                    <tr
+                      key={o.id}
+                      className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition"
+                      onClick={() => onPickOrder(o)}
+                    >
+                      <td className="px-2 py-2.5 text-gray-500 tabular-nums">{idx}</td>
+                      <td className="px-2 py-2.5 text-gray-700 tabular-nums">{fmtDate(o.date?.seconds)}</td>
+                      <td className="px-2 py-2.5 text-gray-700 font-mono text-xs">{(o.id || "").slice(0, 8).toUpperCase()}</td>
+                      <td className="px-2 py-2.5 text-gray-700 font-mono text-xs">№ {(o.id || "").slice(-6).toUpperCase()}</td>
+                      <td className="px-2 py-2.5">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold ${statusInfo.color} ${statusInfo.bg}`}>
+                          {statusInfo.label}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2.5 text-gray-700">{seller}</td>
+                      <td className="px-2 py-2.5 text-gray-900 font-medium">{customerNameFor(o)}</td>
+                      <td className="px-2 py-2.5 text-right text-gray-700 tabular-nums">{o.totalQuantity}</td>
+                      <td className="px-2 py-2.5 text-right text-gray-900 font-bold tabular-nums">
+                        {formatUZS(o.totalPrice)}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination footer */}
+        <div className="border-t border-gray-200 bg-white px-4 sm:px-6 py-3 flex flex-wrap items-center gap-3 text-sm">
+          <span className="text-gray-500">
+            Total <span className="font-bold text-gray-900 tabular-nums">{filtered.length}</span>
+          </span>
+
+          <div className="flex items-center gap-1.5 ml-auto">
+            <select
+              value={perPage}
+              onChange={(e) => setPerPage(Number(e.target.value))}
+              className="h-8 px-2 rounded-md border border-gray-200 bg-white text-xs font-bold cursor-pointer hover:bg-gray-50"
+            >
+              <option value={25}>25/page</option>
+              <option value={50}>50/page</option>
+              <option value={100}>100/page</option>
+              <option value={200}>200/page</option>
+            </select>
+
+            <button
+              onClick={() => setPage(Math.max(1, safePage - 1))}
+              disabled={safePage <= 1}
+              className="size-8 rounded-md border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+              aria-label="Oldingi"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="size-4"><polyline points="15 18 9 12 15 6" /></svg>
+            </button>
+            <span className="size-8 rounded-md bg-blue-500 text-white text-xs font-bold tabular-nums flex items-center justify-center">{safePage}</span>
+            <button
+              onClick={() => setPage(Math.min(totalPages, safePage + 1))}
+              disabled={safePage >= totalPages}
+              className="size-8 rounded-md border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+              aria-label="Keyingi"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="size-4"><polyline points="9 18 15 12 9 6" /></svg>
+            </button>
+
+            <label className="text-xs text-gray-600 ml-1">Go to</label>
+            <input
+              type="number"
+              min={1}
+              max={totalPages}
+              value={safePage}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                if (Number.isFinite(v)) setPage(Math.min(totalPages, Math.max(1, v)));
+              }}
+              className="w-14 h-8 px-2 rounded-md border border-gray-200 bg-white text-xs tabular-nums text-center outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
+        </div>
       </div>
     </div>
   );
