@@ -1,23 +1,10 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-
-/**
- * Resolve the HMAC verification secret. Same fix as
- * `app/api/auth/session/route.ts`: previous code fell back to
- * FIREBASE_PROJECT_ID (public) which let attackers forge cookies. We now
- * REQUIRE SESSION_SECRET at verify time. If misconfigured, no cookie can
- * pass verification — middleware sends users to /login, which is the
- * correct fail-closed behaviour for an auth gate.
- */
-function getSessionSecret(): string | null {
-  const s = process.env.SESSION_SECRET;
-  if (!s || s.length < 16) return null;
-  return s;
-}
+import { resolveSessionSecretSafe } from '@/lib/session-secret';
 
 async function verifySession(sessionValue: string): Promise<{ role: string; uid: string } | null> {
   try {
-    const secret = getSessionSecret();
+    const secret = resolveSessionSecretSafe();
     if (!secret) return null; // fail-closed when misconfigured
 
     const dotIndex = sessionValue.lastIndexOf('.');

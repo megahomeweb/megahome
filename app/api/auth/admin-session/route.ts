@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ADMIN_EMAIL, getAdminPassword } from '@/lib/admin-config';
+import { resolveSessionSecret } from '@/lib/session-secret';
 
 /**
  * Hardcoded-admin session minter. Sidesteps Firebase Admin SDK entirely.
@@ -23,19 +24,11 @@ import { ADMIN_EMAIL, getAdminPassword } from '@/lib/admin-config';
  *   - Middleware already verifies HMAC + role on every /admin/* request.
  */
 
-function getSessionSecret(): string {
-  const s = process.env.SESSION_SECRET;
-  if (!s || s.length < 16) {
-    throw new Error('SESSION_SECRET env var is required and must be at least 16 chars');
-  }
-  return s;
-}
-
 async function signPayload(payload: string): Promise<string> {
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     'raw',
-    encoder.encode(getSessionSecret()),
+    encoder.encode(resolveSessionSecret()),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign']
@@ -102,10 +95,6 @@ export async function POST(req: NextRequest) {
     return response;
   } catch (error) {
     console.error('Admin session error:', error);
-    const message =
-      error instanceof Error && error.message.includes('SESSION_SECRET')
-        ? 'Server konfiguratsiyasi xato: SESSION_SECRET kerak'
-        : 'Sessiya yaratilmadi';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: 'Sessiya yaratilmadi' }, { status: 500 });
   }
 }
