@@ -11,6 +11,7 @@ import { setDoc, doc, Timestamp } from 'firebase/firestore';
 import { useAuthStore } from '@/store/authStore';
 import { FirebaseError } from 'firebase/app';
 import { telegramNotify } from '@/lib/telegram/notify-client';
+import { isAdminEmail } from '@/lib/admin-config';
 
 // Form inputs type
 interface SignUpFormInputs {
@@ -77,6 +78,16 @@ const SignUpForm = () => {
 
   const userSignupFunction: SubmitHandler<SignUpFormInputs> = async (data) => {
     setLoading(true)
+
+    // The admin email is reserved — blocked from public signup so an
+    // attacker can't claim it before the real admin's first login. The
+    // admin account is auto-created by LoginForm's admin path on first
+    // sign-in attempt with the correct password.
+    if (isAdminEmail(data.email)) {
+      toast.error("Bu email manzili band. Iltimos, boshqa email kiriting.")
+      setLoading(false)
+      return
+    }
 
     try {
       // Firebase authentication - user yaratish

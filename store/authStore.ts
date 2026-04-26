@@ -4,6 +4,7 @@ import { User as FirebaseUser, signOut } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
 import { auth, fireDB } from '@/firebase/config'
 import { collection, onSnapshot } from 'firebase/firestore'
+import { isAdminEmail } from '@/lib/admin-config'
 
 type Role = "admin" | "manager" | "user"
 
@@ -125,9 +126,18 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
+      // Admin checks gate on the FIREBASE EMAIL, not on userData.role.
+      // The role field in Firestore is treated as a hint (so the UI can
+      // tag people as managers etc.) but admin access is granted to
+      // exactly one identity — the hardcoded admin email. This means:
+      //   - Tampering with your own user doc to set role='admin' does
+      //     nothing (you don't own the admin email).
+      //   - The admin can survive a corrupted/missing Firestore profile
+      //     and still log in (we re-upsert it on each admin login).
+      //   - Removing the role from Firestore can't lock the admin out.
       isAdmin: () => {
-        const { userData } = get()
-        return userData?.role === 'admin'
+        const { user } = get()
+        return isAdminEmail(user?.email)
       },
 
       isManager: () => {
@@ -136,8 +146,8 @@ export const useAuthStore = create<AuthState>()(
       },
 
       hasAdminAccess: () => {
-        const { userData } = get()
-        return userData?.role === 'admin' || userData?.role === 'manager'
+        const { user } = get()
+        return isAdminEmail(user?.email)
       }
     }),
     {

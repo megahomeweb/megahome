@@ -5,11 +5,16 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { SubmitHandler, useForm } from 'react-hook-form';
 import toast from 'react-hot-toast'
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  type User as FirebaseUser,
+} from 'firebase/auth';
 import { auth, fireDB } from '@/firebase/config';
-import { doc, getDoc } from 'firebase/firestore'
+import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore'
 import { FirebaseError } from 'firebase/app';
 import { useAuthStore, type UserData } from '@/store/authStore';
+import { ADMIN_EMAIL, isAdminEmail } from '@/lib/admin-config';
 
 interface LoginFormInputs {
   email: string
@@ -32,92 +37,171 @@ const LoginForm = () => {
     }
   })
 
+  // === Hardcoded-admin login path ====================================
+  // Sidesteps Firebase Admin SDK entirely (which is what was producing
+  // "Invalid token"). On the very first login attempt for the admin
+  // email, the Firebase Auth user might not exist yet — we auto-create
+  // it so the operator never has to "register" first. Then we upsert
+  // the Firestore profile with role='admin' (idempotent), and finally
+  // mint the admin cookie via the dedicated endpoint.
+  const handleAdminLogin = async (
+    email: string,
+    password: string,
+  ): Promise<void> => {
+    let firebaseUser: FirebaseUser
+
+    try {
+      const cred = await signInWithEmailAndPassword(auth, email, password)
+      firebaseUser = cred.user
+    } catch (err) {
+      // First-ever admin login: account doesn't exist in Firebase Auth
+      // yet. Auto-create with the hardcoded password so the admin never
+      // has to do a manual signup step. Subsequent logins use the
+      // existing account.
+      const code = err instanceof FirebaseError ? err.code : ''
+      const isMissing =
+        code === 'auth/user-not-found' || code === 'auth/invalid-credential'
+
+      if (!isMissing) {
+        throw err
+      }
+
+      try {
+        const created = await createUserWithEmailAndPassword(auth, email, password)
+        firebaseUser = created.user
+      } catch (createErr) {
+        // If account exists with a DIFFERENT password, sign-in failed
+        // with invalid-credential and create now fails with email-in-use.
+        // Surface a useful message so the operator knows what happened.
+        const createCode = createErr instanceof FirebaseError ? createErr.code : ''
+        if (createCode === 'auth/email-already-in-use') {
+          throw new FirebaseError(
+            'auth/invalid-credential',
+            'Admin akkaunti mavjud, lekin parol mos kelmaydi',
+          )
+        }
+        throw createErr
+      }
+    }
+
+    // Upsert the Firestore profile with role='admin'. `merge: true` keeps
+    // any existing fields (name, phone, time/date) intact while ensuring
+    // role is correct.
+    const userRef = doc(fireDB, 'user', firebaseUser.uid)
+    const snap = await getDoc(userRef)
+    const existing = snap.exists() ? (snap.data() as Partial<UserData>) : {}
+    const adminUserData: UserData = {
+      name: existing.name || 'Admin',
+      email: ADMIN_EMAIL,
+      uid: firebaseUser.uid,
+      role: 'admin',
+      time: existing.time ?? Timestamp.now(),
+      date:
+        existing.date ||
+        new Date().toLocaleString('en-US', {
+          month: 'short',
+          day: '2-digit',
+          year: 'numeric',
+        }),
+      phone: existing.phone || '',
+    }
+    await setDoc(userRef, adminUserData, { merge: true })
+
+    // Mint the admin session cookie via the dedicated endpoint. This
+    // does NOT call /api/auth/session — that endpoint relies on
+    // Firebase Admin verifyIdToken and was failing with "Invalid token".
+    const res = await fetch('/api/auth/admin-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        password,
+        uid: firebaseUser.uid,
+      }),
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({} as Record<string, unknown>))
+      const msg = (body as { error?: string })?.error || `Sessiya yaratilmadi (${res.status})`
+      throw new Error(msg)
+    }
+
+    // Hydrate the store BEFORE navigating so ProtectedRoute has fresh
+    // data on the very first paint of /admin (avoids the role-check
+    // race we fixed in the previous commit).
+    const { setUser, setUserData } = useAuthStore.getState()
+    setUser(firebaseUser)
+    setUserData(adminUserData)
+
+    reset()
+    toast.success('Admin paneliga xush kelibsiz')
+    router.push('/admin')
+  }
+
+  // === Non-admin (regular user) login path ===========================
+  const handleUserLogin = async (
+    email: string,
+    password: string,
+  ): Promise<void> => {
+    const cred = await signInWithEmailAndPassword(auth, email, password)
+    const firebaseUser = cred.user
+
+    const userSnap = await getDoc(doc(fireDB, 'user', firebaseUser.uid))
+    if (!userSnap.exists()) {
+      toast.error("Profil topilmadi. Iltimos, ro'yxatdan o'ting.")
+      return
+    }
+    const userData = { ...(userSnap.data() as UserData), uid: firebaseUser.uid }
+
+    // Defensive: if a non-admin email somehow has role='admin' in
+    // Firestore (legacy data, manual tampering), strip it. Admin access
+    // is governed by the hardcoded email check, not the doc.
+    if (!isAdminEmail(firebaseUser.email)) {
+      userData.role = userData.role === 'manager' ? 'manager' : 'user'
+    }
+
+    // For non-admin users we do NOT need a server cookie — they don't
+    // pass through admin middleware. Skipping the /api/auth/session call
+    // also means non-admins are unaffected by Firebase Admin SDK
+    // misconfiguration.
+
+    const { setUser, setUserData } = useAuthStore.getState()
+    setUser(firebaseUser)
+    setUserData(userData)
+
+    reset()
+    toast.success('Tizimga muvaffaqiyatli kirdingiz')
+
+    const search = typeof window !== 'undefined' ? window.location.search : ''
+    const redirectParam = new URLSearchParams(search).get('redirect')
+    const safeRedirect =
+      redirectParam && redirectParam.startsWith('/') && !redirectParam.startsWith('//')
+        ? redirectParam
+        : null
+
+    router.push(safeRedirect || '/')
+  }
+
   const userLoginFunction: SubmitHandler<LoginFormInputs> = async (data) => {
     setLoading(true)
 
     try {
-      // 1. Authenticate with Firebase Auth.
-      const userCredential = await signInWithEmailAndPassword(auth, data.email, data.password);
-      const user = userCredential.user
-
-      // 2. Read user profile from Firestore (single round-trip; was a
-      //    realtime onSnapshot listener that never needed to be realtime).
-      const userSnap = await getDoc(doc(fireDB, 'user', user.uid))
-      if (!userSnap.exists()) {
-        // The Auth account exists but no Firestore profile — orphaned
-        // signup, or doc deleted. Surface this clearly instead of leaving
-        // the user staring at a frozen "Kirilyapti..." button.
-        toast.error("Profil topilmadi. Iltimos, administrator bilan bog'laning.")
-        setLoading(false)
-        return
+      const email = data.email.trim()
+      if (isAdminEmail(email)) {
+        await handleAdminLogin(email, data.password)
+      } else {
+        await handleUserLogin(email, data.password)
       }
-      const userData = { ...(userSnap.data() as UserData), uid: user.uid }
-      if (!userData.role) {
-        toast.error("Foydalanuvchi roli aniqlanmadi")
-        setLoading(false)
-        return
-      }
-
-      // 3. Mint the server-signed session cookie. This MUST succeed for
-      //    middleware to let the user through to /admin — previously the
-      //    error was swallowed (// best-effort) so a misconfigured
-      //    SESSION_SECRET produced a silent loop: success toast →
-      //    router.push('/admin') → middleware bounces back to /login.
-      try {
-        const idToken = await user.getIdToken()
-        const res = await fetch('/api/auth/session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken }),
-        })
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({} as Record<string, unknown>))
-          const msg = (body as { error?: string })?.error || `Sessiya yaratilmadi (${res.status})`
-          console.error('Session POST failed', res.status, body)
-          toast.error(msg)
-          setLoading(false)
-          return
-        }
-      } catch (err) {
-        console.error('Session network error', err)
-        toast.error("Sessiya yaratilmadi: tarmoq xatosi")
-        setLoading(false)
-        return
-      }
-
-      // 4. Hydrate the Zustand store BEFORE navigating. AuthProvider's
-      //    onAuthStateChanged also fires and writes the same data, but it
-      //    races with the navigation — if router.push('/admin') wins,
-      //    AdminLayout mounts with userData=null and ProtectedRoute can't
-      //    decide whether to allow the page. Writing here makes the
-      //    decision deterministic on the very first paint.
-      const { setUser, setUserData } = useAuthStore.getState()
-      setUser(user)
-      setUserData(userData)
-
-      reset()
-      toast.success("Tizimga muvaffaqiyatli kirdingiz")
-
-      // 5. Honour ?redirect=/admin/... so a user bounced from a deep admin
-      //    page lands back where they were trying to go. Read directly
-      //    from window so we don't drag in next/navigation's
-      //    useSearchParams (which would force /login out of static
-      //    rendering and break the production build).
-      const search = typeof window !== 'undefined' ? window.location.search : ''
-      const redirectParam = new URLSearchParams(search).get('redirect')
-      const safeRedirect =
-        redirectParam && redirectParam.startsWith('/') && !redirectParam.startsWith('//')
-          ? redirectParam
-          : null
-
-      const isStaff = userData.role === 'admin' || userData.role === 'manager'
-      router.push(safeRedirect || (isStaff ? '/admin' : '/'))
     } catch (error) {
-      setLoading(false)
       if (error instanceof FirebaseError) {
         switch (error.code) {
           case 'auth/invalid-credential':
             toast.error("Email noto‘g‘ri yoki parol xato")
+            break
+          case 'auth/user-not-found':
+            toast.error("Bunday foydalanuvchi topilmadi")
+            break
+          case 'auth/wrong-password':
+            toast.error("Parol noto‘g‘ri")
             break
           case 'auth/invalid-email':
             toast.error("Email manzili noto‘g‘ri")
@@ -128,14 +212,25 @@ const LoginForm = () => {
           case 'auth/network-request-failed':
             toast.error("Internet aloqasi yo'q. Tarmoqni tekshiring")
             break
+          case 'auth/email-already-in-use':
+            toast.error("Email allaqachon ro'yxatdan o'tgan")
+            break
+          case 'auth/weak-password':
+            toast.error("Parol juda oddiy")
+            break
           default:
             console.error('Login error', error.code, error.message)
-            toast.error("Kirish amalga oshmadi. Iltimos, qayta urinib ko'ring")
+            toast.error(error.message || "Kirish amalga oshmadi")
         }
+      } else if (error instanceof Error) {
+        console.error('Login error', error)
+        toast.error(error.message)
       } else {
         console.error('Login unknown error', error)
         toast.error("Noma'lum xatolik yuz berdi")
       }
+    } finally {
+      setLoading(false)
     }
   }
 

@@ -8,17 +8,26 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Helper: Check if user is admin
+    // Helper: Check if user is admin.
+    // SECURITY MODEL: admin is identified by EMAIL, not by the role field
+    // in the Firestore user doc. This means even if someone tampers with
+    // their own user doc to set role='admin', they don't gain admin
+    // access — they don't own the hardcoded admin email. The single
+    // admin identity is wired both here and in lib/admin-config.ts; keep
+    // them in sync if you ever rotate.
     function isAdmin() {
       return isAuth() &&
-        get(/databases/$(database)/documents/user/$(request.auth.uid)).data.role == 'admin';
+        request.auth.token.email == 'hayatabdulloh@gmail.com';
     }
 
-    // Helper: Check if user is staff (admin OR manager) — staff have
-    // legitimate cross-customer read access on the user collection.
+    // Helper: Check if user is staff (admin OR manager). Manager remains
+    // a Firestore-doc-based role for now since there's no separate
+    // hardcoded list — managers get cross-customer read access to the
+    // user collection but no admin privileges (write to products,
+    // categories, etc. require isAdmin).
     function isStaff() {
-      return isAuth() && (
-        get(/databases/$(database)/documents/user/$(request.auth.uid)).data.role == 'admin' ||
+      return isAdmin() || (
+        isAuth() &&
         get(/databases/$(database)/documents/user/$(request.auth.uid)).data.role == 'manager'
       );
     }
