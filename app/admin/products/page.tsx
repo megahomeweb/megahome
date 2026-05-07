@@ -33,10 +33,10 @@ const CategoryFilter = ({ activeCategory, setActiveCategory, categoryCounts, tot
   }, [fetchCategories]);
 
   return (
-    <div className="flex flex-wrap gap-2 px-4 pb-4">
+    <div data-no-swipe className="flex gap-2 px-3 sm:px-4 pb-3 sm:pb-4 overflow-x-auto scrollbar-hide sm:flex-wrap sm:overflow-visible">
       <Button
         variant={"default"}
-        className={`cursor-pointer px-4 py-2 rounded-xl border text-sm font-medium transition-all ${activeCategory === 'all' ? 'bg-black text-white' : 'bg-gray-100 hover:bg-gray-100/90 text-black'}`}
+        className={`cursor-pointer px-3 sm:px-4 h-9 sm:h-10 rounded-xl border text-xs sm:text-sm font-medium transition-all shrink-0 ${activeCategory === 'all' ? 'bg-black text-white' : 'bg-gray-100 hover:bg-gray-100/90 text-black'}`}
         onClick={() => setActiveCategory('all')}
       >
         Barchasi ({totalCount})
@@ -45,7 +45,7 @@ const CategoryFilter = ({ activeCategory, setActiveCategory, categoryCounts, tot
         <Button
           variant={"default"}
           key={cat.id}
-          className={`cursor-pointer px-4 py-2 rounded-xl border text-sm font-medium transition-all ${activeCategory === cat.name ? 'bg-black text-white' : 'bg-gray-100 hover:bg-gray-100/90 text-black'}`}
+          className={`cursor-pointer px-3 sm:px-4 h-9 sm:h-10 rounded-xl border text-xs sm:text-sm font-medium transition-all shrink-0 ${activeCategory === cat.name ? 'bg-black text-white' : 'bg-gray-100 hover:bg-gray-100/90 text-black'}`}
           onClick={() => setActiveCategory(cat.name)}
         >
           {cat.name} ({categoryCounts[cat.name] ?? 0})
@@ -146,12 +146,12 @@ const Products = () => {
     }
 
     return (
-      <div className='px-4 pb-4'>
-        <h3 className='text-sm font-medium mb-2 pl-1'>Subkategoriya boyicha filter</h3>
-        <div className="flex flex-wrap gap-2">
+      <div className='px-3 sm:px-4 pb-3 sm:pb-4'>
+        <h3 className='text-xs sm:text-sm font-medium mb-1.5 sm:mb-2 pl-1 text-gray-500'>Subkategoriya bo&apos;yicha filter</h3>
+        <div data-no-swipe className="flex gap-2 overflow-x-auto scrollbar-hide sm:flex-wrap sm:overflow-visible">
           <Button
             variant={"default"}
-            className={`cursor-pointer px-4 py-2 rounded-xl border text-sm font-medium transition-all ${activeSubcategory === 'all' ? 'bg-black text-white' : 'bg-gray-100 hover:bg-gray-100/90 text-black'}`}
+            className={`cursor-pointer px-3 sm:px-4 h-9 sm:h-10 rounded-xl border text-xs sm:text-sm font-medium transition-all shrink-0 ${activeSubcategory === 'all' ? 'bg-black text-white' : 'bg-gray-100 hover:bg-gray-100/90 text-black'}`}
             onClick={() => setActiveSubcategory('all')}
           >
             Barchasi ({allInCategoryCount})
@@ -160,7 +160,7 @@ const Products = () => {
             <Button
               variant={"default"}
               key={subcat}
-              className={`cursor-pointer px-4 py-2 rounded-xl border text-sm font-medium transition-all ${activeSubcategory === subcat ? 'bg-black text-white' : 'bg-gray-100 hover:bg-gray-100/90 text-black'}`}
+              className={`cursor-pointer px-3 sm:px-4 h-9 sm:h-10 rounded-xl border text-xs sm:text-sm font-medium transition-all shrink-0 ${activeSubcategory === subcat ? 'bg-black text-white' : 'bg-gray-100 hover:bg-gray-100/90 text-black'}`}
               onClick={() => setActiveSubcategory(subcat)}
             >
               {subcat} ({subcategoryCounts[subcat] ?? 0})
@@ -179,18 +179,18 @@ const Products = () => {
     <div>
       <PanelTitle title='Mahsulotlar' />
       {/* Primary CTAs + overflow menu — all ≥h-10 for one-thumb use on 360dp */}
-      <div data-no-swipe className="flex gap-2 px-4 pb-3 flex-wrap items-center">
+      <div data-no-swipe className="flex gap-2 px-3 sm:px-4 pb-2 sm:pb-3 flex-wrap items-center">
         <Link href="/admin/create-product" className="shrink-0">
-          <Button className="h-10 rounded-xl cursor-pointer text-sm gap-1.5 bg-black text-white hover:bg-black/90 btn-press glow-green px-3 sm:px-4">
+          <Button className="h-9 sm:h-10 rounded-xl cursor-pointer text-xs sm:text-sm gap-1 sm:gap-1.5 bg-black text-white hover:bg-black/90 btn-press glow-green px-2.5 sm:px-4">
             <Plus className="size-4" /> Mahsulot
           </Button>
         </Link>
         <Link href="/admin/create-category" className="shrink-0">
-          <Button variant="outline" className="h-10 rounded-xl cursor-pointer text-sm gap-1.5 btn-press px-3 sm:px-4">
+          <Button variant="outline" className="h-9 sm:h-10 rounded-xl cursor-pointer text-xs sm:text-sm gap-1 sm:gap-1.5 btn-press px-2.5 sm:px-4">
             <FolderPlus className="size-4" /> Kategoriya
           </Button>
         </Link>
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex gap-1.5 sm:gap-2">
           <ProductPrimaryActions
             hasProducts={products.length > 0}
             onExportExcel={() =>

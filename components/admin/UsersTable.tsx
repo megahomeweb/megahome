@@ -158,7 +158,7 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
   };
 
   return (
-    <div className="w-full px-4 py-3">
+    <div className="w-full px-3 sm:px-4 py-2 sm:py-3">
       {/* Desktop table */}
       <div className="hidden md:block overflow-x-auto rounded-xl border border-gray-200 bg-white">
         <table className="min-w-full w-full">

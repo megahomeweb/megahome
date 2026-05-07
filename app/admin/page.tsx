@@ -32,15 +32,15 @@ const Dashboard = () => {
       <DashboardSummary />
 
       {/* Charts Section */}
-      <div className="px-4 pb-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="px-3 sm:px-4 pb-3 sm:pb-4 grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
         {/* Revenue Trend */}
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <TrendingUp className="size-4 text-emerald-600" />
-              <h3 className="text-sm font-bold text-gray-900">Daromad va foyda</h3>
+        <div className="bg-white rounded-xl border border-gray-200 p-3 sm:p-4 min-w-0">
+          <div className="flex items-center justify-between mb-3 gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <TrendingUp className="size-4 text-emerald-600 shrink-0" />
+              <h3 className="text-sm font-bold text-gray-900 truncate">Daromad va foyda</h3>
             </div>
-            <div className="flex items-center gap-3 text-[10px]">
+            <div className="flex items-center gap-2 sm:gap-3 text-[10px] shrink-0">
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Daromad</span>
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Foyda</span>
             </div>
@@ -49,26 +49,26 @@ const Dashboard = () => {
         </div>
 
         {/* Order Status Donut */}
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-3 sm:p-4 min-w-0">
           <div className="flex items-center gap-2 mb-3">
-            <BarChart3 className="size-4 text-blue-600" />
-            <h3 className="text-sm font-bold text-gray-900">Buyurtmalar holati</h3>
+            <BarChart3 className="size-4 text-blue-600 shrink-0" />
+            <h3 className="text-sm font-bold text-gray-900 truncate">Buyurtmalar holati</h3>
           </div>
           <OrderStatusChart orders={orders} />
         </div>
       </div>
 
       {/* Daily Orders Bar Chart */}
-      <div className="px-4 pb-4">
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <BarChart3 className="size-4 text-blue-600" />
-              <h3 className="text-sm font-bold text-gray-900">Kunlik buyurtmalar</h3>
+      <div className="px-3 sm:px-4 pb-3 sm:pb-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-3 sm:p-4">
+          <div className="flex items-center justify-between mb-3 gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <BarChart3 className="size-4 text-blue-600 shrink-0" />
+              <h3 className="text-sm font-bold text-gray-900 truncate">Kunlik buyurtmalar</h3>
             </div>
-            <div className="flex items-center gap-3 text-[10px]">
+            <div className="flex items-center gap-2 sm:gap-3 text-[10px] shrink-0">
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> Jami</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Yetkazildi</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> <span className="hidden xs:inline">Yetkazildi</span><span className="xs:hidden">Yetk.</span></span>
             </div>
           </div>
           <DailyOrdersChart orders={orders} days={14} />
@@ -76,8 +76,8 @@ const Dashboard = () => {
       </div>
 
       {/* Recent Orders */}
-      <div className="px-4 pb-4">
-        <div className="flex items-center justify-between mb-3">
+      <div className="px-3 sm:px-4 pb-3 sm:pb-4">
+        <div className="flex items-center justify-between mb-2 sm:mb-3">
           <h2 className="text-sm font-bold text-gray-900">Oxirgi buyurtmalar</h2>
           <Link href="/admin/orders" className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900 transition-colors">
             Barchasini ko&apos;rish <ArrowRight className="size-3" />

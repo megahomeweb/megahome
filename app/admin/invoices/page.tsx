@@ -65,8 +65,8 @@ const InvoicesPage = () => {
       <PanelTitle title="Schyot-fakturalar" />
       <Search search={search} handleSearchChange={setSearch} placeholder="Mijoz nomi, telefon yoki ID bo'yicha qidirish" />
 
-      <div className="px-4 py-3">
-        <div className="flex gap-2 mb-4 flex-wrap">
+      <div className="px-3 sm:px-4 py-2 sm:py-3">
+        <div data-no-swipe className="flex gap-2 mb-3 sm:mb-4 overflow-x-auto scrollbar-hide sm:flex-wrap sm:overflow-visible">
           {[
             { key: 'today', label: 'Bugun' },
             { key: 'week', label: 'Shu hafta' },
@@ -74,7 +74,7 @@ const InvoicesPage = () => {
             { key: 'all', label: 'Barchasi' },
           ].map((p) => (
             <button key={p.key} onClick={() => setPeriod(p.key as any)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+              className={`shrink-0 px-3 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium transition-colors ${
                 period === p.key ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}>
               {p.label}
@@ -82,11 +82,11 @@ const InvoicesPage = () => {
           ))}
         </div>
 
-        <div className="flex gap-2 mb-4">
-          <button onClick={() => setSortBy('date')} className={`px-3 py-1.5 rounded-full text-xs font-medium ${sortBy === 'date' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>
+        <div data-no-swipe className="flex gap-2 mb-3 sm:mb-4">
+          <button onClick={() => setSortBy('date')} className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${sortBy === 'date' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>
             Sana bo&apos;yicha
           </button>
-          <button onClick={() => setSortBy('amount')} className={`px-3 py-1.5 rounded-full text-xs font-medium ${sortBy === 'amount' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>
+          <button onClick={() => setSortBy('amount')} className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${sortBy === 'amount' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>
             Summa bo&apos;yicha
           </button>
         </div>
@@ -110,9 +110,9 @@ const InvoicesPage = () => {
         )}
       </div>
 
-      <div className="px-4 py-3">
+      <div className="px-3 sm:px-4 py-2 sm:py-3">
         {filteredOrders.length === 0 ? (
-          <p className="text-gray-500 text-center py-10">Buyurtmalar topilmadi</p>
+          <p className="text-gray-500 text-center py-10 text-sm">Buyurtmalar topilmadi</p>
         ) : (
           <div className="space-y-2">
             {filteredOrders.map((order, idx) => {
@@ -123,50 +123,60 @@ const InvoicesPage = () => {
               return (
                 <div
                   key={order.id}
-                  className="flex items-center justify-between gap-4 bg-white rounded-xl border border-gray-200 px-4 py-3 flex-wrap"
+                  className="bg-white rounded-xl border border-gray-200 px-2.5 sm:px-4 py-2.5 sm:py-3"
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <input
-                      type="checkbox"
-                      checked={selectedInvoiceIds.has(order.id)}
-                      onChange={() => {
-                        const next = new Set(selectedInvoiceIds);
-                        if (next.has(order.id)) next.delete(order.id); else next.add(order.id);
-                        setSelectedInvoiceIds(next);
-                      }}
-                      className="size-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900 cursor-pointer mr-2"
-                    />
-                    <span className="text-sm text-gray-400 font-medium w-6 shrink-0">{idx + 1}</span>
-                    <div className="min-w-0">
-                      <p className="font-bold text-sm text-gray-900 capitalize truncate">
-                        {order.clientName}
-                      </p>
-                      <p className="text-xs text-gray-500">{order.clientPhone}</p>
+                  {/* Mobile: 2-row compact layout (top: ☑ # name + price/Faktura, bottom: phone + date + status pill).
+                      Desktop (sm+): single-row flex with 4 trailing columns. */}
+                  <div className="flex items-center gap-2 sm:gap-3 sm:justify-between sm:flex-wrap">
+                    <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                      <input
+                        type="checkbox"
+                        checked={selectedInvoiceIds.has(order.id)}
+                        onChange={() => {
+                          const next = new Set(selectedInvoiceIds);
+                          if (next.has(order.id)) next.delete(order.id); else next.add(order.id);
+                          setSelectedInvoiceIds(next);
+                        }}
+                        className="size-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900 cursor-pointer shrink-0"
+                      />
+                      <span className="hidden sm:inline text-sm text-gray-400 font-medium w-6 shrink-0">{idx + 1}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-bold text-sm text-gray-900 capitalize truncate">
+                          {order.clientName}
+                        </p>
+                        <p className="text-[11px] sm:text-xs text-gray-500 truncate">{order.clientPhone}</p>
+                      </div>
+                    </div>
+
+                    {/* Right cluster — wraps to its own line on narrow phones */}
+                    <div className="flex items-center gap-2 sm:gap-4 flex-wrap shrink-0">
+                      <div className="hidden sm:block text-right">
+                        <p className="text-xs text-gray-400">#{invoiceNum}</p>
+                        <p className="text-xs text-gray-500">{date}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-gray-900 tabular-nums">{formatUZS(order.totalPrice)}</p>
+                        <p className="text-[11px] sm:text-xs text-gray-500">{order.totalQuantity} ta</p>
+                      </div>
+                      <span
+                        className={`inline-flex items-center px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-lg text-[10px] sm:text-[11px] font-bold ${statusInfo.color} ${statusInfo.bg}`}
+                      >
+                        {statusInfo.label}
+                      </span>
+                      <Link href={`/admin/invoice/${order.id}`} target="_blank">
+                        <Button
+                          variant="outline"
+                          className="rounded-xl cursor-pointer text-[11px] sm:text-xs h-7 sm:h-8 gap-1 border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100 hover:text-teal-800 px-2 sm:px-3"
+                        >
+                          <FileText className="size-3 sm:size-3.5" /> Faktura
+                        </Button>
+                      </Link>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-4 flex-wrap">
-                    <div className="text-right">
-                      <p className="text-xs text-gray-400">#{invoiceNum}</p>
-                      <p className="text-xs text-gray-500">{date}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-bold text-gray-900">{formatUZS(order.totalPrice)}</p>
-                      <p className="text-xs text-gray-500">{order.totalQuantity} ta</p>
-                    </div>
-                    <span
-                      className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[11px] font-bold ${statusInfo.color} ${statusInfo.bg}`}
-                    >
-                      {statusInfo.label}
-                    </span>
-                    <Link href={`/admin/invoice/${order.id}`} target="_blank">
-                      <Button
-                        variant="outline"
-                        className="rounded-xl cursor-pointer text-xs h-8 gap-1 border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100 hover:text-teal-800"
-                      >
-                        <FileText className="size-3.5" /> Faktura
-                      </Button>
-                    </Link>
+                  {/* Mobile-only meta row */}
+                  <div className="sm:hidden flex items-center justify-between mt-1.5 pt-1.5 border-t border-gray-100 text-[10px] text-gray-400">
+                    <span>#{invoiceNum}</span>
+                    <span>{date}</span>
                   </div>
                 </div>
               );

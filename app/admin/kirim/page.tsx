@@ -98,9 +98,9 @@ const KirimPage = () => {
     <div>
       <PanelTitle title="Kirim (Tovar qabul qilish)" />
 
-      <div className="px-4 py-3 space-y-4">
+      <div className="px-3 sm:px-4 py-2 sm:py-3 space-y-3 sm:space-y-4">
         {/* Supplier */}
-        <div className="grid sm:grid-cols-2 gap-4">
+        <div className="grid sm:grid-cols-2 gap-3 sm:gap-4">
           <div>
             <label className="text-sm font-medium text-gray-700 block mb-1">Yetkazib beruvchi*</label>
             <input
@@ -146,59 +146,104 @@ const KirimPage = () => {
           )}
         </div>
 
-        {/* Items table */}
+        {/* Items: desktop table, mobile cards */}
         {items.length > 0 && (
-          <div className="border border-gray-200 rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="text-left px-4 py-2 font-medium">Mahsulot</th>
-                  <th className="text-center px-4 py-2 font-medium w-28">Miqdor</th>
-                  <th className="text-center px-4 py-2 font-medium w-36">Tan narxi (dona)</th>
-                  <th className="text-right px-4 py-2 font-medium w-36">Jami</th>
-                  <th className="w-12"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item, index) => (
-                  <tr key={item.productId} className="border-t border-gray-100">
-                    <td className="px-4 py-2 font-medium">{item.productTitle}</td>
-                    <td className="px-4 py-2">
+          <>
+            <div className="hidden sm:block border border-gray-200 rounded-xl overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="text-left px-4 py-2 font-medium">Mahsulot</th>
+                    <th className="text-center px-4 py-2 font-medium w-28">Miqdor</th>
+                    <th className="text-center px-4 py-2 font-medium w-36">Tan narxi (dona)</th>
+                    <th className="text-right px-4 py-2 font-medium w-36">Jami</th>
+                    <th className="w-12"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item, index) => (
+                    <tr key={item.productId} className="border-t border-gray-100">
+                      <td className="px-4 py-2 font-medium">{item.productTitle}</td>
+                      <td className="px-4 py-2">
+                        <input
+                          type="number"
+                          min="1"
+                          className="w-full text-center rounded-lg bg-gray-100 h-8 text-sm focus:outline-none"
+                          value={item.quantity}
+                          onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value) || 0)}
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <input
+                          type="number"
+                          min="0"
+                          className="w-full text-center rounded-lg bg-gray-100 h-8 text-sm focus:outline-none"
+                          value={item.unitCost}
+                          onChange={(e) => updateItem(index, 'unitCost', parseInt(e.target.value) || 0)}
+                        />
+                      </td>
+                      <td className="px-4 py-2 text-right font-semibold">{formatUZS(item.totalCost)}</td>
+                      <td className="px-2 py-2">
+                        <button onClick={() => removeItem(index)} className="text-red-500 hover:text-red-700 cursor-pointer p-1">
+                          <Trash2 className="size-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-gray-200 bg-green-50">
+                    <td colSpan={3} className="px-4 py-3 font-bold text-right">Umumiy summa:</td>
+                    <td className="px-4 py-3 text-right font-bold text-green-700 text-base">{formatUZS(totalAmount)}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            {/* Mobile cards — qty/cost inputs stacked side-by-side, item title on its own row */}
+            <div className="sm:hidden space-y-2">
+              {items.map((item, index) => (
+                <div key={item.productId} className="border border-gray-200 rounded-xl p-2.5 bg-white">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <p className="text-sm font-semibold text-gray-900 line-clamp-2 leading-snug flex-1">{item.productTitle}</p>
+                    <button onClick={() => removeItem(index)} className="text-red-500 hover:text-red-700 cursor-pointer p-1 -mt-1 -mr-1 shrink-0">
+                      <Trash2 className="size-4" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <div>
+                      <label className="text-[10px] text-gray-500 uppercase font-semibold">Miqdor</label>
                       <input
                         type="number"
                         min="1"
-                        className="w-full text-center rounded-lg bg-gray-100 h-8 text-sm focus:outline-none"
+                        className="w-full text-center rounded-lg bg-gray-100 h-9 text-sm focus:outline-none"
                         value={item.quantity}
                         onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value) || 0)}
                       />
-                    </td>
-                    <td className="px-4 py-2">
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 uppercase font-semibold">Tan narxi</label>
                       <input
                         type="number"
                         min="0"
-                        className="w-full text-center rounded-lg bg-gray-100 h-8 text-sm focus:outline-none"
+                        className="w-full text-center rounded-lg bg-gray-100 h-9 text-sm focus:outline-none"
                         value={item.unitCost}
                         onChange={(e) => updateItem(index, 'unitCost', parseInt(e.target.value) || 0)}
                       />
-                    </td>
-                    <td className="px-4 py-2 text-right font-semibold">{formatUZS(item.totalCost)}</td>
-                    <td className="px-2 py-2">
-                      <button onClick={() => removeItem(index)} className="text-red-500 hover:text-red-700 cursor-pointer p-1">
-                        <Trash2 className="size-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t-2 border-gray-200 bg-green-50">
-                  <td colSpan={3} className="px-4 py-3 font-bold text-right">Umumiy summa:</td>
-                  <td className="px-4 py-3 text-right font-bold text-green-700 text-base">{formatUZS(totalAmount)}</td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between text-xs pt-1.5 border-t border-gray-100">
+                    <span className="text-gray-500">Jami</span>
+                    <span className="font-bold text-green-700 tabular-nums">{formatUZS(item.totalCost)}</span>
+                  </div>
+                </div>
+              ))}
+              <div className="border-2 border-green-200 bg-green-50 rounded-xl p-3 flex items-center justify-between">
+                <span className="font-bold text-sm">Umumiy summa</span>
+                <span className="font-bold text-green-700 text-base tabular-nums">{formatUZS(totalAmount)}</span>
+              </div>
+            </div>
+          </>
         )}
 
         {/* Submit */}

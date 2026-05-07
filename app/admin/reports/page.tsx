@@ -91,14 +91,14 @@ const ReportsPage = () => {
   return (
     <div>
       <PanelTitle title="Hisobotlar" />
-      <div className="px-4 py-3">
-        {/* Period selector */}
-        <div className="flex gap-2 mb-6">
+      <div className="px-3 sm:px-4 py-2 sm:py-3">
+        {/* Period selector — horizontally scrollable on narrow phones */}
+        <div data-no-swipe className="flex gap-2 mb-4 sm:mb-6 overflow-x-auto scrollbar-hide -mx-1 px-1">
           {periods.map((p) => (
             <button
               key={p.value}
               onClick={() => setPeriod(p.value)}
-              className={`px-4 py-2 rounded-xl text-sm font-medium cursor-pointer transition-colors ${
+              className={`shrink-0 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-medium cursor-pointer transition-colors ${
                 period === p.value ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
@@ -153,77 +153,115 @@ const ReportsPage = () => {
         </div>
 
         {/* Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="size-4 text-emerald-600" />
-                <h3 className="text-sm font-bold text-gray-900">Daromad tendensiyasi</h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 mb-4 sm:mb-6">
+          <div className="bg-white rounded-xl border border-gray-200 p-3 sm:p-4 min-w-0">
+            <div className="flex items-center justify-between mb-3 gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <TrendingUp className="size-4 text-emerald-600 shrink-0" />
+                <h3 className="text-sm font-bold text-gray-900 truncate">Daromad tendensiyasi</h3>
               </div>
-              <div className="flex items-center gap-3 text-[10px]">
+              <div className="flex items-center gap-2 sm:gap-3 text-[10px] shrink-0">
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Daromad</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Foyda</span>
               </div>
             </div>
             <RevenueChart orders={orders} days={period === 'today' ? 1 : period === 'week' ? 7 : period === 'month' ? 30 : 90} />
           </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <BarChart3 className="size-4 text-blue-600" />
-                <h3 className="text-sm font-bold text-gray-900">Kunlik buyurtmalar</h3>
+          <div className="bg-white rounded-xl border border-gray-200 p-3 sm:p-4 min-w-0">
+            <div className="flex items-center justify-between mb-3 gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <BarChart3 className="size-4 text-blue-600 shrink-0" />
+                <h3 className="text-sm font-bold text-gray-900 truncate">Kunlik buyurtmalar</h3>
               </div>
-              <div className="flex items-center gap-3 text-[10px]">
+              <div className="flex items-center gap-2 sm:gap-3 text-[10px] shrink-0">
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> Jami</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Yetkazildi</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> <span className="hidden xs:inline">Yetkazildi</span><span className="xs:hidden">Yetk.</span></span>
               </div>
             </div>
             <DailyOrdersChart orders={orders} days={period === 'today' ? 1 : period === 'week' ? 7 : period === 'month' ? 30 : 90} />
           </div>
         </div>
 
-        {/* Top products by profit */}
+        {/* Top products by profit — desktop table, mobile cards */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
-            <BarChart3 className="size-4 text-gray-600" />
+          <div className="px-3 sm:px-4 py-2 sm:py-3 border-b border-gray-100 flex items-center gap-2">
+            <BarChart3 className="size-4 text-gray-600 shrink-0" />
             <h3 className="font-bold text-sm">Eng foydali mahsulotlar</h3>
           </div>
           {stats.topProducts.length === 0 ? (
             <p className="px-4 py-6 text-sm text-gray-400 text-center">Ma&apos;lumotlar mavjud emas</p>
           ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="text-left px-4 py-2 font-medium">#</th>
-                  <th className="text-left px-4 py-2 font-medium">Mahsulot</th>
-                  <th className="text-right px-4 py-2 font-medium">Sotildi</th>
-                  <th className="text-right px-4 py-2 font-medium">Daromad</th>
-                  <th className="text-right px-4 py-2 font-medium">Tan narxi</th>
-                  <th className="text-right px-4 py-2 font-medium">Foyda</th>
-                  <th className="text-right px-4 py-2 font-medium">Marja</th>
-                </tr>
-              </thead>
-              <tbody>
+            <>
+              {/* Desktop table */}
+              <div data-no-swipe className="hidden sm:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="text-left px-4 py-2 font-medium">#</th>
+                      <th className="text-left px-4 py-2 font-medium">Mahsulot</th>
+                      <th className="text-right px-4 py-2 font-medium">Sotildi</th>
+                      <th className="text-right px-4 py-2 font-medium">Daromad</th>
+                      <th className="text-right px-4 py-2 font-medium">Tan narxi</th>
+                      <th className="text-right px-4 py-2 font-medium">Foyda</th>
+                      <th className="text-right px-4 py-2 font-medium">Marja</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.topProducts.map((p, idx) => {
+                      const margin = p.revenue > 0 ? ((p.profit / p.revenue) * 100) : 0;
+                      return (
+                        <tr key={idx} className="border-t border-gray-50">
+                          <td className="px-4 py-2 text-gray-500">{idx + 1}</td>
+                          <td className="px-4 py-2 font-medium">{p.title}</td>
+                          <td className="px-4 py-2 text-right">{p.qty} ta</td>
+                          <td className="px-4 py-2 text-right text-green-700 font-semibold">{formatUZS(p.revenue)}</td>
+                          <td className="px-4 py-2 text-right text-gray-500">{formatUZS(p.cost)}</td>
+                          <td className={`px-4 py-2 text-right font-bold ${p.profit >= 0 ? 'text-amber-600' : 'text-red-600'}`}>
+                            {formatUZS(p.profit)}
+                          </td>
+                          <td className={`px-4 py-2 text-right font-semibold ${margin >= 20 ? 'text-green-600' : margin >= 10 ? 'text-amber-600' : 'text-red-600'}`}>
+                            {margin.toFixed(1)}%
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {/* Mobile cards — every metric visible without horizontal scroll */}
+              <div className="sm:hidden divide-y divide-gray-100">
                 {stats.topProducts.map((p, idx) => {
                   const margin = p.revenue > 0 ? ((p.profit / p.revenue) * 100) : 0;
                   return (
-                    <tr key={idx} className="border-t border-gray-50">
-                      <td className="px-4 py-2 text-gray-500">{idx + 1}</td>
-                      <td className="px-4 py-2 font-medium">{p.title}</td>
-                      <td className="px-4 py-2 text-right">{p.qty} ta</td>
-                      <td className="px-4 py-2 text-right text-green-700 font-semibold">{formatUZS(p.revenue)}</td>
-                      <td className="px-4 py-2 text-right text-gray-500">{formatUZS(p.cost)}</td>
-                      <td className={`px-4 py-2 text-right font-bold ${p.profit >= 0 ? 'text-amber-600' : 'text-red-600'}`}>
-                        {formatUZS(p.profit)}
-                      </td>
-                      <td className={`px-4 py-2 text-right font-semibold ${margin >= 20 ? 'text-green-600' : margin >= 10 ? 'text-amber-600' : 'text-red-600'}`}>
-                        {margin.toFixed(1)}%
-                      </td>
-                    </tr>
+                    <div key={idx} className="px-3 py-2.5">
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <div className="flex items-start gap-2 min-w-0 flex-1">
+                          <span className="text-xs text-gray-400 shrink-0 mt-0.5 w-5">{idx + 1}.</span>
+                          <p className="text-sm font-semibold text-gray-900 line-clamp-2 leading-snug">{p.title}</p>
+                        </div>
+                        <span className={`text-xs font-bold shrink-0 px-1.5 py-0.5 rounded ${margin >= 20 ? 'bg-green-100 text-green-700' : margin >= 10 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                          {margin.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1 ml-7 text-[11px]">
+                        <div>
+                          <p className="text-gray-400">Sotildi</p>
+                          <p className="font-semibold text-gray-700">{p.qty} ta</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400">Daromad</p>
+                          <p className="font-semibold text-green-700 tabular-nums">{formatUZS(p.revenue)}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400">Foyda</p>
+                          <p className={`font-bold tabular-nums ${p.profit >= 0 ? 'text-amber-600' : 'text-red-600'}`}>{formatUZS(p.profit)}</p>
+                        </div>
+                      </div>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
+              </div>
+            </>
           )}
         </div>
       </div>

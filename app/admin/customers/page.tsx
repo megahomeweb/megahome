@@ -129,10 +129,10 @@ const CustomersPage = () => {
     <div>
       <PanelTitle title="Mijozlar reytingi" />
       {customerStats.length > 0 && (
-        <div className="px-4 pb-3">
+        <div className="px-3 sm:px-4 pb-2 sm:pb-3">
           <Button
             variant="outline"
-            className="rounded-xl cursor-pointer text-xs h-8 gap-1"
+            className="rounded-xl cursor-pointer text-xs h-8 gap-1 max-w-full"
             onClick={() => {
               // Export what the operator is actually looking at — when they've
               // filtered to "Xavfli" customers to run a re-engagement
@@ -155,7 +155,7 @@ const CustomersPage = () => {
       <Search search={search} handleSearchChange={setSearch} placeholder="Mijoz ismi yoki telefon..." />
 
       {/* Activity filter tabs */}
-      <div className="px-4 pb-3 overflow-x-auto -mb-px">
+      <div data-no-swipe className="px-3 sm:px-4 pb-2 sm:pb-3 overflow-x-auto scrollbar-hide -mb-px">
         <div className="flex gap-2 min-w-max">
           {[
             { key: 'all', label: 'Barchasi' },
@@ -174,13 +174,13 @@ const CustomersPage = () => {
         </div>
       </div>
 
-      <div className="px-4 py-3">
+      <div className="px-3 sm:px-4 py-2 sm:py-3">
         {total === 0 ? (
-          <p className="text-gray-500 text-center py-10">
+          <p className="text-gray-500 text-center py-10 text-sm">
             {search.length >= 2 ? 'Mijoz topilmadi' : 'Mijozlar mavjud emas'}
           </p>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2 sm:space-y-3">
             {pageItems.map((customer, localIdx) => {
               const idx = (page - 1) * perPage + localIdx;
               const rank = idx + 1;
@@ -191,7 +191,7 @@ const CustomersPage = () => {
               return (
                 <div
                   key={idx}
-                  className={`bg-white rounded-xl border p-4 ${isTop3 ? 'border-yellow-200 shadow-md' : 'border-gray-200'}`}
+                  className={`bg-white rounded-xl border p-3 sm:p-4 min-w-0 ${isTop3 ? 'border-yellow-200 shadow-md' : 'border-gray-200'}`}
                 >
                   <div className="space-y-3">
                     <div className="flex items-center gap-3">

@@ -26,9 +26,13 @@ const AdminLayout = ({ children }: { children: ReactNode }) => {
             <OfflineBanner />
           </div>
 
-          {/* Page content — extra bottom padding on mobile for BottomNav */}
-          <main className="flex-1 p-2 sm:p-4 md:p-6 pb-20 lg:pb-6 print:p-0">
-            <div className='bg-white w-full h-full rounded-xl sm:rounded-2xl p-2 sm:p-4 shadow-xl sm:shadow-2xl print:shadow-none print:rounded-none print:p-0 overflow-x-hidden'>
+          {/* Page content — extra bottom padding on mobile for BottomNav.
+              Mobile drops the outer padding entirely so the white card spans
+              edge-to-edge; nested children still own their own per-page
+              padding. Avoids the old "outer p-2 + inner p-2 = 16px wasted
+              on each side" stacking that crippled 360dp viewports. */}
+          <main className="flex-1 p-0 sm:p-4 md:p-6 pb-20 lg:pb-6 print:p-0">
+            <div className='bg-white w-full h-full rounded-none sm:rounded-2xl p-0 sm:p-4 shadow-none sm:shadow-2xl print:shadow-none print:rounded-none print:p-0 min-w-0'>
               <SwipeableAdminContent>
                 {children}
               </SwipeableAdminContent>

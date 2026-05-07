@@ -116,9 +116,9 @@ const AdminProfilePage = () => {
   };
 
   return (
-    <div className="p-6 max-w-xl mx-auto">
+    <div className="px-3 sm:px-6 py-3 sm:py-6 max-w-xl mx-auto">
       <PanelTitle title="Profilim" />
-      <form onSubmit={handleSubmit} className="space-y-4 mt-6">
+      <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4 mt-3 sm:mt-6 px-1">
         <div>
           <label className="block mb-1 font-medium">Ism</label>
           <input

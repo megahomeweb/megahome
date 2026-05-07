@@ -116,10 +116,10 @@ const Orders = () => {
     <div>
       <PanelTitle title="Buyurtmalar" />
       <Search search={search} handleSearchChange={setSearch} placeholder="Buyurtmalarni qidirish" />
-      <div data-no-swipe className="flex flex-wrap gap-2 px-4 pb-3">
+      <div data-no-swipe className="flex flex-wrap gap-1.5 sm:gap-2 px-3 sm:px-4 pb-2 sm:pb-3">
         {newOrderCount > 0 && (
           <Button onClick={handleConfirmAllNew} disabled={confirmingAll}
-            className="rounded-xl cursor-pointer text-sm h-10 gap-1.5 bg-amber-500 hover:bg-amber-600 text-white btn-press glow-amber px-3 sm:px-4">
+            className="rounded-xl cursor-pointer text-xs sm:text-sm h-9 sm:h-10 gap-1 sm:gap-1.5 bg-amber-500 hover:bg-amber-600 text-white btn-press glow-amber px-2.5 sm:px-4">
             <CheckCheck className="size-4" />
             {confirmingAll ? "..." : `${newOrderCount} ta tasdiqlash`}
           </Button>
@@ -131,12 +131,12 @@ const Orders = () => {
           if (deliveryOrders.length === 0) { toast.error("Yetkazish uchun buyurtma yo'q"); return; }
           generateDeliverySheet(deliveryOrders);
           toast.success(`${deliveryOrders.length} ta buyurtma uchun varaqasi yaratildi`);
-        }} className="rounded-xl cursor-pointer text-sm h-10 gap-1.5 btn-press px-3 sm:px-4" variant="outline">
+        }} className="rounded-xl cursor-pointer text-xs sm:text-sm h-9 sm:h-10 gap-1 sm:gap-1.5 btn-press px-2.5 sm:px-4" variant="outline">
           <FileText className="size-4" /> <span className="hidden xs:inline">Yetkazish </span>varaqasi
         </Button>
         <Button
           variant="outline"
-          className="rounded-xl cursor-pointer text-sm h-10 gap-1.5 px-3 sm:px-4"
+          className="rounded-xl cursor-pointer text-xs sm:text-sm h-9 sm:h-10 gap-1 sm:gap-1.5 px-2.5 sm:px-4"
           onClick={() => {
             if (filteredOrders.length === 0) {
               toast.error("Eksport qilinadigan buyurtma yo'q");
@@ -160,8 +160,8 @@ const Orders = () => {
           return filteredOrders.length > 0 ? filteredOrders.map((order, idx) => (
           <Disclosure key={order.id}>
             {({ open }) => (
-              <div className="mb-2">
-                <div className={`flex items-center w-full px-2 sm:px-4 py-2 shadow-lg rounded-lg border border-l-4 ${
+              <div className="mb-2 mx-3 sm:mx-0">
+                <div className={`flex items-center w-full px-2 sm:px-4 py-2 shadow-lg rounded-lg border border-l-4 gap-2 ${
                   order.status === 'yetkazildi' ? 'border-l-green-500' :
                   order.status === 'yangi' || !order.status ? 'border-l-blue-500' :
                   order.status === 'tasdiqlangan' ? 'border-l-amber-500' :
@@ -173,26 +173,34 @@ const Orders = () => {
                     type="checkbox"
                     checked={selectedOrderIds.has(order.id)}
                     onChange={() => toggleSelectOrder(order.id)}
-                    className="mr-3 size-4 accent-gray-900 cursor-pointer shrink-0"
+                    className="size-4 accent-gray-900 cursor-pointer shrink-0"
                   />
-                <DisclosureButton className="flex items-center justify-between w-full text-left">
-                  <div className='flex items-start gap-2'>
-                    <span className='text-sm text-gray-500 mt-1'>{idx + 1}.</span>
-                    <div className="flex items-center gap-4 flex-wrap">
-                      <div>
-                        <h3 className="text-base font-bold capitalize">{order.clientName}</h3>
-                        <p className="text-sm text-gray-500">{order.clientPhone}</p>
+                <DisclosureButton className="flex items-center justify-between w-full text-left gap-2 min-w-0">
+                  {/* Mobile: 2-line compact layout — name + price on top, phone + status pill + qty + date on bottom.
+                      Desktop (sm+): single horizontal flex with all chips inline. */}
+                  <div className="flex items-start gap-2 min-w-0 flex-1">
+                    <span className='text-xs sm:text-sm text-gray-500 mt-0.5 sm:mt-1 shrink-0'>{idx + 1}.</span>
+                    <div className="min-w-0 flex-1 sm:flex sm:items-center sm:gap-4 sm:flex-wrap">
+                      <div className="flex items-center justify-between gap-2 min-w-0 sm:flex-none">
+                        <div className="min-w-0 flex-1 sm:flex-none">
+                          <h3 className="text-sm sm:text-base font-bold capitalize truncate">{order.clientName}</h3>
+                          <p className="text-xs sm:text-sm text-gray-500 truncate">{order.clientPhone}</p>
+                        </div>
+                        {/* Price pinned to right on mobile so it always reads at a glance */}
+                        <span className="sm:hidden text-sm font-bold text-green-600 tabular-nums shrink-0">{formatUZS(order.totalPrice)}</span>
                       </div>
-                      <StatusBadge status={order.status} />
-                      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
-                        {order.totalQuantity} ta
-                      </span>
-                      <span className="text-sm font-bold text-green-600">{formatUZS(order.totalPrice)}</span>
-                      <p className="text-sm text-gray-500">Sana Vaqt: {formatDateTimeShort(order.date)}</p>
+                      <div className="mt-1 sm:mt-0 flex items-center gap-1.5 sm:gap-3 flex-wrap">
+                        <StatusBadge status={order.status} />
+                        <span className="text-[10px] sm:text-xs bg-gray-100 text-gray-600 px-1.5 sm:px-2 py-0.5 rounded-full">
+                          {order.totalQuantity} ta
+                        </span>
+                        <span className="hidden sm:inline text-sm font-bold text-green-600">{formatUZS(order.totalPrice)}</span>
+                        <p className="text-[10px] sm:text-sm text-gray-500 truncate">{formatDateTimeShort(order.date)}</p>
+                      </div>
                     </div>
                   </div>
                   <IoIosArrowDown
-                    className={`text-xl transition-all duration-300 ${
+                    className={`text-lg sm:text-xl transition-all duration-300 shrink-0 ${
                       open ? "rotate-180" : ""
                     }`}
                   />
@@ -207,66 +215,55 @@ const Orders = () => {
                   leaveFrom="transform opacity-100 max-h-[600px]"
                   leaveTo="transform opacity-0 max-h-0"
                 >
-                  <DisclosurePanel className="px-4 py-2 bg-gray-100">
-                    {/* Status changer + financials */}
-                    <div className="flex items-center gap-3 mb-3 p-3 bg-white rounded-lg border border-gray-200 flex-wrap">
-                      <span className="text-sm font-semibold text-gray-700">Holati:</span>
-                      <select
-                        className="flex-1 max-w-xs border border-gray-300 rounded-lg px-3 py-1.5 text-sm font-medium bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/30"
-                        value={order.status || 'yangi'}
-                        onChange={(e) => handleStatusChange(order.id, e.target.value as OrderStatus)}
-                        disabled={updatingId === order.id}
-                      >
-                        {ORDER_STATUSES.map((s) => (
-                          <option key={s.value} value={s.value}>{s.label}</option>
-                        ))}
-                      </select>
-                      {updatingId === order.id && (
-                        <span className="inline-block w-4 h-4 border-2 border-t-transparent border-primary rounded-full animate-spin" />
-                      )}
-                      <Link href={`/admin/invoice/${order.id}`} target="_blank">
-                        <Button
-                          variant="outline"
-                          className="rounded-lg cursor-pointer text-xs h-7 gap-1 border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100"
+                  <DisclosurePanel className="px-2 sm:px-4 py-2 bg-gray-100">
+                    {/* Status changer + share actions — wraps on mobile, stacks chips into a horizontally scrollable strip when very narrow */}
+                    <div className="mb-2 sm:mb-3 p-2 sm:p-3 bg-white rounded-lg border border-gray-200">
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
+                        <span className="text-xs sm:text-sm font-semibold text-gray-700 shrink-0">Holati:</span>
+                        <select
+                          className="flex-1 min-w-[140px] max-w-xs border border-gray-300 rounded-lg px-2 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm font-medium bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/30"
+                          value={order.status || 'yangi'}
+                          onChange={(e) => handleStatusChange(order.id, e.target.value as OrderStatus)}
+                          disabled={updatingId === order.id}
                         >
-                          <FileText className="size-3" /> Faktura
+                          {ORDER_STATUSES.map((s) => (
+                            <option key={s.value} value={s.value}>{s.label}</option>
+                          ))}
+                        </select>
+                        {updatingId === order.id && (
+                          <span className="inline-block w-4 h-4 border-2 border-t-transparent border-primary rounded-full animate-spin" />
+                        )}
+                      </div>
+                      <div data-no-swipe className="flex items-center gap-1.5 sm:gap-2 flex-nowrap overflow-x-auto scrollbar-hide sm:flex-wrap sm:overflow-visible -mx-1 px-1">
+                        <Link href={`/admin/invoice/${order.id}`} target="_blank" className="shrink-0">
+                          <Button variant="outline" className="rounded-lg cursor-pointer text-xs h-7 gap-1 border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100">
+                            <FileText className="size-3" /> Faktura
+                          </Button>
+                        </Link>
+                        <Button variant="outline" type="button" onClick={() => shareOrderToTelegram(order)}
+                          className="rounded-lg cursor-pointer text-xs h-7 gap-1 border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100 shrink-0">
+                          <Send className="size-3" /> Telegram
                         </Button>
-                      </Link>
-                      <Button
-                        variant="outline"
-                        type="button"
-                        onClick={() => shareOrderToTelegram(order)}
-                        className="rounded-lg cursor-pointer text-xs h-7 gap-1 border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100"
-                      >
-                        <Send className="size-3" /> Telegram
-                      </Button>
-                      <Button
-                        variant="outline"
-                        type="button"
-                        onClick={() => shareOrderToWhatsApp(order)}
-                        className="rounded-lg cursor-pointer text-xs h-7 gap-1 border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                      >
-                        <MessageCircle className="size-3" /> WhatsApp
-                      </Button>
-                      <Button
-                        variant="outline"
-                        type="button"
-                        onClick={async () => {
-                          const ok = await copyOrderText(order);
-                          toast.success(ok ? 'Buyurtma matni nusxalandi' : 'Nusxalab bo\'lmadi');
-                        }}
-                        className="rounded-lg cursor-pointer text-xs h-7 gap-1"
-                      >
-                        <Download className="size-3" /> Nusxalash
-                      </Button>
-                      <div className="ml-auto flex items-center gap-4 text-right">
+                        <Button variant="outline" type="button" onClick={() => shareOrderToWhatsApp(order)}
+                          className="rounded-lg cursor-pointer text-xs h-7 gap-1 border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shrink-0">
+                          <MessageCircle className="size-3" /> WhatsApp
+                        </Button>
+                        <Button variant="outline" type="button" onClick={async () => {
+                            const ok = await copyOrderText(order);
+                            toast.success(ok ? 'Buyurtma matni nusxalandi' : 'Nusxalab bo\'lmadi');
+                          }} className="rounded-lg cursor-pointer text-xs h-7 gap-1 shrink-0">
+                          <Download className="size-3" /> Nusxalash
+                        </Button>
+                      </div>
+                      {/* Financials — 2-col grid on mobile, inline on desktop */}
+                      <div className="grid grid-cols-2 sm:flex sm:items-center sm:gap-4 sm:justify-end mt-2 pt-2 border-t border-gray-100 gap-x-3 gap-y-1.5 text-right">
                         <div>
                           <p className="text-[10px] text-gray-400 uppercase">Jami</p>
                           <p className="text-xs font-bold text-gray-700">{order.totalQuantity} ta</p>
                         </div>
                         <div>
                           <p className="text-[10px] text-gray-400 uppercase">Sotish</p>
-                          <p className="text-sm font-bold text-green-700">{formatUZS(order.totalPrice)}</p>
+                          <p className="text-xs sm:text-sm font-bold text-green-700">{formatUZS(order.totalPrice)}</p>
                         </div>
                         {(() => {
                           const cost = (order.basketItems || []).reduce((s, i) => s + (i.costPrice || 0) * i.quantity, 0);
@@ -276,11 +273,11 @@ const Orders = () => {
                             <>
                               <div>
                                 <p className="text-[10px] text-gray-400 uppercase">Tan narxi</p>
-                                <p className="text-sm font-bold text-gray-500">{formatUZS(cost)}</p>
+                                <p className="text-xs sm:text-sm font-bold text-gray-500">{formatUZS(cost)}</p>
                               </div>
                               <div>
                                 <p className="text-[10px] text-gray-400 uppercase">Foyda</p>
-                                <p className={`text-sm font-bold ${profit > 0 ? 'text-amber-600' : 'text-red-600'}`}>{formatUZS(profit)}</p>
+                                <p className={`text-xs sm:text-sm font-bold ${profit > 0 ? 'text-amber-600' : 'text-red-600'}`}>{formatUZS(profit)}</p>
                               </div>
                             </>
                           );
@@ -288,8 +285,8 @@ const Orders = () => {
                       </div>
                     </div>
 
-                    {/* Items table */}
-                    <div data-no-swipe className="overflow-x-auto">
+                    {/* Items: desktop table, mobile cards (no horizontal scroll required) */}
+                    <div data-no-swipe className="hidden sm:block overflow-x-auto">
                       <table className="min-w-full text-left table-auto">
                         <thead>
                           <tr>
@@ -322,6 +319,26 @@ const Orders = () => {
                         </tbody>
                       </table>
                     </div>
+                    <div className="sm:hidden space-y-1.5">
+                      {order.basketItems.map((item, index) => {
+                        const { title, price, category, quantity, productImageUrl } = item;
+                        return (
+                          <div key={index} className="flex items-center gap-2 bg-white rounded-lg border border-gray-200 p-2">
+                            <span className="text-[10px] text-gray-400 shrink-0 w-4">{index + 1}.</span>
+                            {productImageUrl?.[0]?.url ? (
+                              <Image width={36} height={36} className="size-9 rounded-md object-cover shrink-0" src={productImageUrl[0].url} alt="" />
+                            ) : (
+                              <div className="size-9 rounded-md bg-gray-100 shrink-0" />
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-semibold text-gray-900 truncate first-letter:uppercase">{title}</p>
+                              <p className="text-[10px] text-gray-500 truncate">{category} · {quantity} ta</p>
+                            </div>
+                            <span className="text-xs font-bold text-gray-700 tabular-nums shrink-0">{formatUZS(price)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </DisclosurePanel>
                 </Transition>
               </div>
@@ -335,7 +352,8 @@ const Orders = () => {
         })()}
 
       {selectedOrderIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-gray-900 text-white px-5 py-3 rounded-2xl shadow-2xl border border-gray-700">
+        <div className="fixed bottom-20 lg:bottom-6 left-2 right-2 lg:left-1/2 lg:right-auto lg:-translate-x-1/2 z-50 flex items-center gap-2 sm:gap-3 bg-gray-900 text-white px-3 sm:px-5 py-2.5 sm:py-3 rounded-2xl shadow-2xl border border-gray-700 pb-[max(0.625rem,env(safe-area-inset-bottom))] lg:pb-3"
+          style={{ maxWidth: "calc(100vw - 1rem)" }}>
           <span className="text-sm font-medium mr-2">{selectedOrderIds.size} ta tanlangan</span>
           <Button size="sm" variant="ghost" onClick={() => setShowBulkStatus(true)} className="text-blue-400 hover:text-blue-300 hover:bg-gray-800 gap-1.5 text-xs btn-press glow-blue">
             Statusni o&apos;zgartirish

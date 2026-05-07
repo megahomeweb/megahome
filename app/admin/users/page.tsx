@@ -37,47 +37,47 @@ const UsersPage = () => {
     <div>
       <PanelTitle title="Foydalanuvchilar" />
 
-      {/* User Stats */}
-      <div className="grid grid-cols-5 gap-2 px-4 pb-4">
-        <div className="bg-white rounded-xl border border-gray-200 p-2.5 sm:p-3">
-          <div className="flex items-center justify-center size-7 rounded-lg bg-blue-100 mb-1">
-            <Users className="size-3.5 text-blue-600" />
+      {/* User Stats — mobile collapses 5-up to 3-col grid (5 was too cramped on 360dp); md+ keeps the wide row */}
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5 sm:gap-2 px-3 sm:px-4 pb-3 sm:pb-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-2 sm:p-3 min-w-0">
+          <div className="flex items-center justify-center size-6 sm:size-7 rounded-lg bg-blue-100 mb-1">
+            <Users className="size-3 sm:size-3.5 text-blue-600" />
           </div>
-          <p className="text-lg sm:text-2xl font-bold text-gray-900">{stats.total}</p>
-          <p className="text-[9px] sm:text-xs text-gray-500">Jami</p>
+          <p className="text-base sm:text-2xl font-bold text-gray-900 tabular-nums">{stats.total}</p>
+          <p className="text-[10px] sm:text-xs text-gray-500">Jami</p>
         </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-2.5 sm:p-3">
-          <div className="flex items-center justify-center size-7 rounded-lg bg-purple-100 mb-1">
-            <ShieldCheck className="size-3.5 text-purple-600" />
+        <div className="bg-white rounded-xl border border-gray-200 p-2 sm:p-3 min-w-0">
+          <div className="flex items-center justify-center size-6 sm:size-7 rounded-lg bg-purple-100 mb-1">
+            <ShieldCheck className="size-3 sm:size-3.5 text-purple-600" />
           </div>
-          <p className="text-lg sm:text-2xl font-bold text-gray-900">{stats.admins}</p>
-          <p className="text-[9px] sm:text-xs text-gray-500">Adminlar</p>
+          <p className="text-base sm:text-2xl font-bold text-gray-900 tabular-nums">{stats.admins}</p>
+          <p className="text-[10px] sm:text-xs text-gray-500 truncate">Adminlar</p>
         </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-2.5 sm:p-3">
-          <div className="flex items-center justify-center size-7 rounded-lg bg-amber-100 mb-1">
-            <UserCheck className="size-3.5 text-amber-600" />
+        <div className="bg-white rounded-xl border border-gray-200 p-2 sm:p-3 min-w-0">
+          <div className="flex items-center justify-center size-6 sm:size-7 rounded-lg bg-amber-100 mb-1">
+            <UserCheck className="size-3 sm:size-3.5 text-amber-600" />
           </div>
-          <p className="text-lg sm:text-2xl font-bold text-gray-900">{stats.managers}</p>
-          <p className="text-[9px] sm:text-xs text-gray-500">Menejerlar</p>
+          <p className="text-base sm:text-2xl font-bold text-gray-900 tabular-nums">{stats.managers}</p>
+          <p className="text-[10px] sm:text-xs text-gray-500 truncate">Menejerlar</p>
         </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-2.5 sm:p-3">
-          <div className="flex items-center justify-center size-7 rounded-lg bg-gray-100 mb-1">
-            <UserCheck className="size-3.5 text-gray-600" />
+        <div className="bg-white rounded-xl border border-gray-200 p-2 sm:p-3 min-w-0">
+          <div className="flex items-center justify-center size-6 sm:size-7 rounded-lg bg-gray-100 mb-1">
+            <UserCheck className="size-3 sm:size-3.5 text-gray-600" />
           </div>
-          <p className="text-lg sm:text-2xl font-bold text-gray-900">{stats.regularUsers}</p>
-          <p className="text-[9px] sm:text-xs text-gray-500">Mijozlar</p>
+          <p className="text-base sm:text-2xl font-bold text-gray-900 tabular-nums">{stats.regularUsers}</p>
+          <p className="text-[10px] sm:text-xs text-gray-500 truncate">Mijozlar</p>
         </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-2.5 sm:p-3">
-          <div className="flex items-center justify-center size-7 rounded-lg bg-green-100 mb-1">
-            <UserPlus className="size-3.5 text-green-600" />
+        <div className="bg-white rounded-xl border border-gray-200 p-2 sm:p-3 min-w-0">
+          <div className="flex items-center justify-center size-6 sm:size-7 rounded-lg bg-green-100 mb-1">
+            <UserPlus className="size-3 sm:size-3.5 text-green-600" />
           </div>
-          <p className="text-lg sm:text-2xl font-bold text-gray-900">{stats.newToday}</p>
-          <p className="text-[9px] sm:text-xs text-gray-500">Yangi</p>
+          <p className="text-base sm:text-2xl font-bold text-gray-900 tabular-nums">{stats.newToday}</p>
+          <p className="text-[10px] sm:text-xs text-gray-500">Yangi</p>
         </div>
       </div>
 
-      {/* Role filter */}
-      <div className="flex gap-2 px-4 pb-3">
+      {/* Role filter — horizontally scrollable on mobile so 4 chips never wrap */}
+      <div data-no-swipe className="flex gap-2 px-3 sm:px-4 pb-2 sm:pb-3 overflow-x-auto scrollbar-hide">
         {([
           { key: 'all', label: 'Barchasi' },
           { key: 'admin', label: 'Adminlar' },
@@ -87,7 +87,7 @@ const UsersPage = () => {
           <button
             key={f.key}
             onClick={() => setRoleFilter(f.key)}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+            className={`shrink-0 px-3 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium transition-colors ${
               roleFilter === f.key
                 ? 'bg-gray-900 text-white'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'

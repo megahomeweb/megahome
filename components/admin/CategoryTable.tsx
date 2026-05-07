@@ -54,7 +54,7 @@ const CategoryTable = ({ search }: CategoryTableProps) => {
   };
 
   return (
-     <div className="w-full px-4 py-3">
+     <div className="w-full px-3 sm:px-4 py-2 sm:py-3">
       {/* Desktop and Tablet view */}
       <div className="hidden md:block overflow-x-auto rounded-xl border border-gray-200 bg-white">
         <table className="min-w-full w-full">
@@ -122,64 +122,70 @@ const CategoryTable = ({ search }: CategoryTableProps) => {
         </table>
       </div>
 
-      {/* Mobile view - Card layout */}
-      <div className="md:hidden space-y-4">
+      {/* Mobile view — compact card matches ProductTable density */}
+      <div className="md:hidden space-y-2">
         {filteredCategories.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-4 text-center text-gray-500">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 text-center text-gray-500 text-sm">
             {search.length >= 2 ? "Kategoriya topilmadi" : "Kategoriyalar mavjud emas"}
           </div>
         ) : (filteredCategories.map((category, index) => (
-          <div key={index} className="bg-white rounded-xl border border-gray-200 p-4">
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="font-medium text-black">{category.name}</h3>
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-500">Rasm</span>
-                <div className='size-16 relative overflow-hidden rounded-2xl'>
-                  {category.categoryImgUrl && category.categoryImgUrl.length > 0 ? (
-                    <Image className='absolute size-full object-cover' src={category.categoryImgUrl[0].url} fill alt={category.name} />
-                  ) : (
-                    <div className='absolute size-full bg-gray-200 flex items-center justify-center text-gray-500 text-xs'>
-                      Rasm yo&apos;q
-                    </div>
-                  )}
-                </div>
+          <div key={index} className="bg-white rounded-xl border border-gray-200 p-2.5">
+            <div className="flex items-center gap-2.5">
+              <div className='size-12 relative overflow-hidden rounded-lg shrink-0'>
+                {category.categoryImgUrl && category.categoryImgUrl.length > 0 ? (
+                  <Image className='absolute size-full object-cover' src={category.categoryImgUrl[0].url} fill alt={category.name} />
+                ) : (
+                  <div className='absolute size-full bg-gray-100 flex items-center justify-center text-gray-400 text-[9px]'>
+                    Rasm
+                  </div>
+                )}
               </div>
-              <div className="flex justify-between items-center pt-2">
-                <span className="text-sm text-gray-500">Subkategoriya</span>
-                <div className="flex flex-wrap gap-2 justify-end">
-                  {category.subcategory && category.subcategory.length > 0 ? (
-                    category.subcategory.map((tag: string, idx: number) => (
-                      <span
-                        key={idx}
-                        className="rounded-md bg-gray-100 text-gray-700 px-3 py-1 text-xs font-medium"
-                      >
-                        {tag}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="text-gray-400 text-xs">-</span>
-                  )}
-                </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-gray-900 truncate">{category.name}</p>
+                {category.subcategory && category.subcategory.length > 0 ? (
+                  <p className="text-[11px] text-gray-500 truncate mt-0.5">
+                    {category.subcategory.length} ta subkategoriya
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-gray-400 mt-0.5">subkategoriyasiz</p>
+                )}
               </div>
-              <div className="flex flex-1 gap-3 flex-wrap pt-3 justify-end">
+              <div data-no-swipe className="flex items-center gap-1 shrink-0">
                 <Button
                   onClick={() => handleEdit(category.id)}
-                  variant={'secondary'}
-                  className="bg-[#e7edf3] rounded-xl h-10 px-4 cursor-pointer text-sm font-bold leading-normal tracking-[0.015em]"
+                  variant={'ghost'}
+                  size="icon"
+                  className="size-8 cursor-pointer"
+                  aria-label="Tahrirlash"
                 >
-                  <span className="truncate">Taxrirlash</span>
+                  <BiEdit size={18} />
                 </Button>
                 <Button
                   onClick={() => handleDelete(category)}
-                  variant={'default'}
-                  className="flex cursor-pointer items-center justify-center overflow-hidden rounded-xl h-10 px-4 bg-black text-white text-sm font-bold leading-normal tracking-[0.015em]"
+                  variant={'ghost'}
+                  size="icon"
+                  className="size-8 cursor-pointer text-red-500 hover:text-red-700"
+                  aria-label="O'chirish"
                 >
-                  O&apos;schirish
+                  <BiTrash size={18} />
                 </Button>
               </div>
             </div>
+            {category.subcategory && category.subcategory.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t border-gray-100">
+                {category.subcategory.slice(0, 6).map((tag: string, idx: number) => (
+                  <span
+                    key={idx}
+                    className="rounded-md bg-gray-100 text-gray-700 px-2 py-0.5 text-[10px] font-medium"
+                  >
+                    {tag}
+                  </span>
+                ))}
+                {category.subcategory.length > 6 && (
+                  <span className="text-[10px] text-gray-400">+{category.subcategory.length - 6}</span>
+                )}
+              </div>
+            )}
           </div>
         )))}
       </div>

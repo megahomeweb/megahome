@@ -110,9 +110,9 @@ const QuickActionsWidget = () => {
   const visibleAttention = attentionItems.filter((item) => item.count > 0);
 
   return (
-    <div className="px-4 py-3 space-y-3">
+    <div className="px-3 sm:px-4 py-2 sm:py-3 space-y-2 sm:space-y-3">
       {/* Quick Actions */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2">
         {actions.map((action) => (
           <Link
             key={action.href}
@@ -125,13 +125,13 @@ const QuickActionsWidget = () => {
         ))}
       </div>
 
-      {/* Needs Attention */}
+      {/* Needs Attention — horizontally scrollable on mobile so chips never wrap */}
       {visibleAttention.length > 0 && (
-        <div className="flex flex-wrap gap-2">
+        <div data-no-swipe className="flex gap-1.5 sm:gap-2 overflow-x-auto scrollbar-hide sm:flex-wrap sm:overflow-visible -mx-1 px-1">
           {visibleAttention.map((item) => (
             <span
               key={item.label}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${item.color}`}
+              className={`shrink-0 inline-flex items-center gap-1.5 rounded-full px-2.5 sm:px-3 py-1 text-[11px] sm:text-xs font-medium ${item.color}`}
             >
               <item.icon className="size-3" />
               {item.count} {item.label}

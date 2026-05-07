@@ -63,10 +63,11 @@ export default function Pagination({
   return (
     <nav
       aria-label="Sahifalar"
-      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-3 ${className}`}
+      data-no-swipe
+      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 py-2 sm:py-3 ${className}`}
     >
       {/* Range + per-page selector */}
-      <div className="flex items-center justify-between sm:justify-start gap-3 sm:gap-4 text-sm text-gray-600 px-1">
+      <div className="flex items-center justify-between sm:justify-start gap-3 sm:gap-4 text-xs sm:text-sm text-gray-600 px-1">
         <p className="tabular-nums">
           <span className="font-bold text-gray-900">{start}</span>
           <span className="mx-1">–</span>
@@ -93,8 +94,8 @@ export default function Pagination({
         </div>
       </div>
 
-      {/* Page navigator */}
-      <div className="flex items-center gap-1 justify-center sm:justify-end" role="group">
+      {/* Page navigator — horizontally scrollable on narrow phones if many pages */}
+      <div className="flex items-center gap-1 justify-center sm:justify-end overflow-x-auto scrollbar-hide" role="group">
         <button
           onClick={() => onPageChange(Math.max(1, safePage - 1))}
           disabled={safePage <= 1}

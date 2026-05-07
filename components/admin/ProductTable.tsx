@@ -106,7 +106,7 @@ const ProductTable = ({ search, category = 'all', subcategory = 'all', selectedI
   };
 
   return (
-     <div className="w-full px-4 py-3">
+     <div className="w-full px-3 sm:px-4 py-2 sm:py-3">
       {/* Desktop and Tablet view */}
       <div className="hidden custom:block overflow-x-auto rounded-xl border border-gray-200 bg-white">
         <table className="min-w-full w-full">
@@ -231,102 +231,85 @@ const ProductTable = ({ search, category = 'all', subcategory = 'all', selectedI
         </table>
       </div>
 
-      {/* Mobile view - Card layout */}
-      <div className="custom:hidden space-y-4">
+      {/* Mobile view — compact 2-section card. Header packs image + title +
+          price + stock pill on one row so the operator can scan a phone-screen
+          full of products without scrolling. Footer holds the actions only. */}
+      <div className="custom:hidden space-y-2">
         {loading && products.length === 0 ? (
           <ProductCardListSkeleton rows={5} />
         ) : total === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-4 text-center text-gray-500">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 text-center text-gray-500 text-sm">
             {search.length >= 2 ? "Mahsulotlar topilmadi" : "Mahsulotlar mavjud emas"}
           </div>
-        ) : (pageItems.map((product, index) => (
-          <div key={product.id} className={`bg-white rounded-xl border border-gray-200 p-4 ${selectedIds.has(product.id) ? 'ring-2 ring-blue-500/30 bg-blue-50/30' : ''}`}>
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="font-medium text-black flex items-center gap-2">
-                <input type="checkbox" checked={selectedIds.has(product.id)} onChange={() => handleToggleOne(product.id)} className="size-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900 cursor-pointer" />
-                <span className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-gray-100 text-xs font-medium text-black">
-                  {(page - 1) * perPage + index + 1}
-                </span>
-                {product.title}
-              </h3>
-              <div className="flex items-center gap-2">
-                <span className="text-gray-700">{formatUZS(product.price)}</span>
-                {product.stock !== undefined && product.stock !== null ? (
-                  product.stock > 0 ? (
-                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                      product.stock <= 5 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
-                    }`}>
-                      {product.stock} ta
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700">
-                      0 ta
-                    </span>
-                  )
+        ) : (pageItems.map((product, index) => {
+          const stock = typeof product.stock === 'number' ? product.stock : null;
+          return (
+          <div key={product.id} className={`bg-white rounded-xl border p-2.5 ${selectedIds.has(product.id) ? 'border-blue-300 bg-blue-50/30' : 'border-gray-200'}`}>
+            <div className="flex items-center gap-2.5">
+              <input
+                type="checkbox"
+                checked={selectedIds.has(product.id)}
+                onChange={() => handleToggleOne(product.id)}
+                className="size-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900 cursor-pointer shrink-0"
+              />
+              <div className='size-12 relative overflow-hidden rounded-lg shrink-0'>
+                {product.productImageUrl && product.productImageUrl.length > 0 ? (
+                  <Image className='absolute size-full object-cover' src={product.productImageUrl[0].url} fill alt={product.title} />
                 ) : (
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">
-                    Belgilanmagan
-                  </span>
+                  <div className='absolute size-full bg-gray-100 flex items-center justify-center text-gray-400 text-[9px]'>
+                    Rasm yo&apos;q
+                  </div>
                 )}
               </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-500">Rasm</span>
-                <div className='size-16 relative overflow-hidden rounded-2xl'>
-                  {product.productImageUrl && product.productImageUrl.length > 0 ? (
-                    <Image className='absolute size-full object-cover' src={product.productImageUrl[0].url} fill alt={product.title} />
-                  ) : (
-                    <div className='absolute size-full bg-gray-200 flex items-center justify-center text-gray-500 text-xs'>
-                      Rasm yo&apos;q
-                    </div>
-                  )}
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-gray-900 line-clamp-1">
+                  <span className="text-[10px] font-medium text-gray-400 mr-1">{(page - 1) * perPage + index + 1}.</span>
+                  {product.title}
+                </p>
+                <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-gray-500">
+                  <span className="truncate">{product.category}{product.subcategory ? ` · ${product.subcategory}` : ''}</span>
                 </div>
               </div>
-              
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-500">Turi</span>
-                <button className="rounded-xl bg-gray-100 text-sm px-3 py-1">
-                  {product.category}
-                </button>
-              </div>
-              <div className="flex justify-between items-center pt-2">
-                <span className="text-sm text-gray-500">Subkategoriya</span>
-                {product.subcategory ? (
-                  <span className="rounded-xl bg-gray-100 text-sm px-3 py-1">
-                    {product.subcategory}
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                <span className="text-sm font-bold text-gray-900 tabular-nums whitespace-nowrap">{formatUZS(product.price)}</span>
+                {stock !== null ? (
+                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                    stock <= 0 ? 'bg-red-100 text-red-700' : stock <= 5 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
+                  }`}>
+                    {stock} ta
                   </span>
                 ) : (
-                  <span className="text-gray-400 text-sm">----</span>
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-500">—</span>
                 )}
               </div>
-              <div className="flex flex-1 gap-3 flex-wrap pt-3 justify-end">
-                <Button
-                  onClick={() => onQuickEdit(product)}
-                  variant={'secondary'}
-                  className="bg-[#e7edf3] rounded-xl h-10 px-4 cursor-pointer text-sm font-bold leading-normal tracking-[0.015em] gap-1.5"
-                >
-                  <Pencil className="size-3.5" /> <span className="truncate">Tez tahrir</span>
-                </Button>
-                <Button
-                  onClick={() => handleEdit(product.id)}
-                  variant={'secondary'}
-                  className="bg-[#e7edf3] rounded-xl h-10 px-4 cursor-pointer text-sm font-bold leading-normal tracking-[0.015em]"
-                >
-                  <span className="truncate">Yangilash</span>
-                </Button>
-                <Button
-                  onClick={() => handleDelete(product)}
-                  variant={'default'}
-                  className="flex cursor-pointer items-center justify-center overflow-hidden rounded-xl h-10 px-4 bg-black text-white text-sm font-bold leading-normal tracking-[0.015em]"
-                >
-                  O&apos;chirish
-                </Button>
-              </div>
+            </div>
+            <div data-no-swipe className="flex items-center gap-1.5 pt-2 mt-2 border-t border-gray-100">
+              <Button
+                onClick={() => onQuickEdit(product)}
+                variant={'secondary'}
+                className="flex-1 bg-[#e7edf3] rounded-lg h-8 px-2 cursor-pointer text-xs font-bold gap-1"
+              >
+                <Pencil className="size-3.5" /> Tez
+              </Button>
+              <Button
+                onClick={() => handleEdit(product.id)}
+                variant={'secondary'}
+                className="flex-1 bg-[#e7edf3] rounded-lg h-8 px-2 cursor-pointer text-xs font-bold"
+              >
+                Yangilash
+              </Button>
+              <Button
+                onClick={() => handleDelete(product)}
+                variant={'default'}
+                className="rounded-lg h-8 px-3 bg-black text-white text-xs font-bold cursor-pointer shrink-0"
+                aria-label="O'chirish"
+              >
+                <BiTrash size={14} />
+              </Button>
             </div>
           </div>
-        )))}
+          );
+        }))}
       </div>
 
       {/* Pagination — same component for desktop & mobile */}

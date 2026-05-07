@@ -69,7 +69,7 @@ const DashboardSummary = () => {
   );
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4 mb-6">
+    <div className="grid grid-cols-2 lg:grid-cols-3 gap-1.5 sm:gap-4 px-3 sm:px-0 mb-4 sm:mb-6">
       {/* New Orders */}
       <Link href="/admin/orders">
         <ShineBorder
