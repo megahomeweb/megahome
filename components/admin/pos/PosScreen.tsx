@@ -214,9 +214,12 @@ export default function PosScreen() {
     [users],
   );
 
-  // Inline search-as-you-type results for the right-panel customer field
+  // Inline results for the right-panel customer field. Empty query → browse
+  // mode: surface every customer (capped at 100 for render perf, matching
+  // CustomerPickerSheet's empty-state). Typed query → narrow to top 10 hits.
   const customerSearchResults = useMemo(() => {
-    if (customerQuery.trim().length < 1) return [];
+    const q = customerQuery.trim();
+    if (q.length < 1) return filteredCustomers.slice(0, 100);
     return filteredCustomers
       .filter(
         (u) =>
@@ -1298,18 +1301,22 @@ function RightPanel({
           </button>
         </div>
 
-        {/* Inline dropdown of matching customers */}
-        {showCustomerDropdown && customerQuery.trim().length >= 1 && (
+        {/* Inline dropdown — empty query browses all customers, typed query narrows */}
+        {showCustomerDropdown && (
           <div className="absolute left-3 right-3 sm:left-4 sm:right-4 top-[calc(100%+4px)] bg-white border border-gray-200 rounded-xl shadow-xl z-30 max-h-80 overflow-y-auto">
             {customerSearchResults.length === 0 ? (
               <div className="p-4 text-center">
-                <p className="text-sm text-gray-400 mb-2">Mijoz topilmadi</p>
+                <p className="text-sm text-gray-400 mb-2">
+                  {customerQuery.trim() ? "Mijoz topilmadi" : "Mijozlar yoʻq"}
+                </p>
                 <button
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={onOpenNewCustomer}
                   className="text-xs text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg font-bold"
                 >
-                  + &quot;{customerQuery}&quot; ni yangi mijoz sifatida qoʻshish
+                  {customerQuery.trim()
+                    ? `+ "${customerQuery}" ni yangi mijoz sifatida qoʻshish`
+                    : "+ Yangi mijoz qoʻshish"}
                 </button>
               </div>
             ) : (
