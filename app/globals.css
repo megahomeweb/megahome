@@ -119,14 +119,30 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    /* Anywhere word-wrap can prevent a single long product title or order ID
+       from forcing horizontal overflow on a phone-width container. */
+    overflow-wrap: anywhere;
   }
   html {
     scroll-behavior: smooth;
-    overflow-x: hidden;
+    /* overflow-x: clip beats overflow-x: hidden because clip *also* prevents
+       descendant fixed/sticky elements from causing scroll, and doesn't
+       create a new scroll container that breaks position:sticky downstream. */
+    overflow-x: clip;
+    /* Belt-and-braces width clamp — defends against any descendant that
+       sets a hardcoded pixel width wider than the viewport. */
+    max-width: 100vw;
   }
   body {
     @apply bg-background text-foreground;
-    overflow-x: hidden;
+    overflow-x: clip;
+    max-width: 100vw;
+  }
+  /* Code-like content keeps its own wrapping rules (we want long URLs to
+     break gracefully, not to spill out of cards). */
+  code, pre {
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 }
 

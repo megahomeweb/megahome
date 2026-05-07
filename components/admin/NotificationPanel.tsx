@@ -142,7 +142,7 @@ const NotificationPanel = () => {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-12 w-[460px] max-h-[600px] bg-white rounded-xl shadow-2xl border border-gray-200 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+        <div className="absolute right-0 top-12 w-[calc(100vw-1rem)] sm:w-[400px] md:w-[460px] max-w-[calc(100vw-1rem)] max-h-[min(600px,calc(100dvh-6rem))] bg-white rounded-xl shadow-2xl border border-gray-200 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
             <h3 className="font-bold text-base text-gray-900">
               Bildirishnomalar

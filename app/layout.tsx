@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import AuthProvider from "@/providers/AuthProvider";
@@ -29,6 +29,19 @@ export const metadata: Metadata = {
   },
 };
 
+// Explicit viewport so mobile browsers render at device width — without this
+// the page falls back to a virtual ~980px viewport and pixel-scales down,
+// which makes every Tailwind sm:/md:/lg: breakpoint mis-fire (everything
+// activates as if on desktop) and is the single biggest cause of "looks
+// terrible on phone." This object replaces what was previously implicit.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  userScalable: true,
+  themeColor: "#000000",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -45,7 +58,6 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="MegaHome" />
         <meta name="mobile-web-app-capable" content="yes" />
-        <meta name="theme-color" content="#000000" />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}

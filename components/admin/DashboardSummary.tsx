@@ -78,15 +78,15 @@ const DashboardSummary = () => {
           duration={unreadOrders.length > 0 ? 8 : 25}
           className="hover:shadow-lg transition-shadow"
         >
-          <div className="relative overflow-hidden w-full rounded-xl p-3 sm:p-4">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-[10px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Yangi buyurtmalar</p>
-                <p className="text-2xl sm:text-2xl sm:text-3xl font-bold text-gray-900 mt-1">{unreadOrders.length}</p>
-                <p className="text-[11px] sm:text-xs text-gray-500 mt-1">Jami: {orders.length} ta</p>
+          <div className="relative overflow-hidden w-full rounded-xl p-2 sm:p-4 min-w-0">
+            <div className="flex items-start justify-between gap-1 sm:gap-2">
+              <div className="min-w-0">
+                <p className="text-[9px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Yangi buyurt.</p>
+                <p className="text-lg sm:text-3xl font-bold text-gray-900 mt-0.5 sm:mt-1 tabular-nums">{unreadOrders.length}</p>
+                <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">Jami: {orders.length}</p>
               </div>
-              <div className={`flex items-center justify-center size-9 sm:size-11 rounded-xl ${unreadOrders.length > 0 ? "bg-green-100" : "bg-gray-100"}`}>
-                <ShoppingCart className={`size-5 ${unreadOrders.length > 0 ? "text-green-600" : "text-gray-400"}`} />
+              <div className={`flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl shrink-0 ${unreadOrders.length > 0 ? "bg-green-100" : "bg-gray-100"}`}>
+                <ShoppingCart className={`size-3.5 sm:size-5 ${unreadOrders.length > 0 ? "text-green-600" : "text-gray-400"}`} />
               </div>
             </div>
           </div>
@@ -101,14 +101,14 @@ const DashboardSummary = () => {
           duration={unreadUsers.length > 0 ? 8 : 25}
           className="hover:shadow-lg transition-shadow"
         >
-          <div className="relative overflow-hidden w-full rounded-xl p-3 sm:p-4">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Yangi foydalanuvchilar</p>
-                <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-1">{unreadUsers.length}</p>
+          <div className="relative overflow-hidden w-full rounded-xl p-2 sm:p-4 min-w-0">
+            <div className="flex items-start justify-between gap-1 sm:gap-2">
+              <div className="min-w-0">
+                <p className="text-[9px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Yangi foyd.</p>
+                <p className="text-lg sm:text-3xl font-bold text-gray-900 mt-0.5 sm:mt-1 tabular-nums">{unreadUsers.length}</p>
               </div>
-              <div className={`flex items-center justify-center size-9 sm:size-11 rounded-xl ${unreadUsers.length > 0 ? "bg-blue-100" : "bg-gray-100"}`}>
-                <UserPlus className={`size-5 ${unreadUsers.length > 0 ? "text-blue-600" : "text-gray-400"}`} />
+              <div className={`flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl shrink-0 ${unreadUsers.length > 0 ? "bg-blue-100" : "bg-gray-100"}`}>
+                <UserPlus className={`size-3.5 sm:size-5 ${unreadUsers.length > 0 ? "text-blue-600" : "text-gray-400"}`} />
               </div>
             </div>
           </div>
@@ -123,17 +123,17 @@ const DashboardSummary = () => {
           duration={25}
           className="hover:shadow-lg transition-shadow"
         >
-          <div className="relative overflow-hidden w-full rounded-xl p-3 sm:p-4">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Jami mahsulotlar</p>
-                <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-1">{totalProducts}</p>
+          <div className="relative overflow-hidden w-full rounded-xl p-2 sm:p-4 min-w-0">
+            <div className="flex items-start justify-between gap-1 sm:gap-2">
+              <div className="min-w-0">
+                <p className="text-[9px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Mahsulotlar</p>
+                <p className="text-lg sm:text-3xl font-bold text-gray-900 mt-0.5 sm:mt-1 tabular-nums">{totalProducts}</p>
                 {lowStockCount > 0 && (
-                  <p className="text-xs text-red-500 font-semibold mt-1">{lowStockCount} ta kam qolgan</p>
+                  <p className="text-[10px] sm:text-xs text-red-500 font-semibold mt-0.5 sm:mt-1 truncate">{lowStockCount} ta kam</p>
                 )}
               </div>
-              <div className="flex items-center justify-center size-9 sm:size-11 rounded-xl bg-purple-100">
-                <Package className="size-5 text-purple-600" />
+              <div className="flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl bg-purple-100 shrink-0">
+                <Package className="size-3.5 sm:size-5 text-purple-600" />
               </div>
             </div>
           </div>
@@ -147,17 +147,17 @@ const DashboardSummary = () => {
         duration={totalRevenue > 0 ? 10 : 25}
         className="hover:shadow-lg transition-shadow"
       >
-        <div className="relative overflow-hidden w-full rounded-xl p-3 sm:p-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Umumiy daromad</p>
-              <p className={`text-lg sm:text-2xl font-bold mt-1 ${totalRevenue > 0 ? "text-green-600" : "text-gray-400"}`}>
+        <div className="relative overflow-hidden w-full rounded-xl p-2 sm:p-4 min-w-0">
+          <div className="flex items-start justify-between gap-1 sm:gap-2">
+            <div className="min-w-0">
+              <p className="text-[9px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Daromad</p>
+              <p className={`text-sm sm:text-2xl font-bold mt-0.5 sm:mt-1 tabular-nums truncate ${totalRevenue > 0 ? "text-green-600" : "text-gray-400"}`}>
                 {totalRevenue > 0 ? formatUZS(totalRevenue) : "0 so'm"}
               </p>
-              <p className="text-xs text-gray-500 mt-1">Yetkazilgan buyurtmalardan</p>
+              <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">Yetkazilganlardan</p>
             </div>
-            <div className={`flex items-center justify-center size-9 sm:size-11 rounded-xl ${totalRevenue > 0 ? "bg-emerald-100" : "bg-gray-100"}`}>
-              <TrendingUp className={`size-5 ${totalRevenue > 0 ? "text-emerald-600" : "text-gray-400"}`} />
+            <div className={`flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl shrink-0 ${totalRevenue > 0 ? "bg-emerald-100" : "bg-gray-100"}`}>
+              <TrendingUp className={`size-3.5 sm:size-5 ${totalRevenue > 0 ? "text-emerald-600" : "text-gray-400"}`} />
             </div>
           </div>
         </div>
@@ -170,19 +170,19 @@ const DashboardSummary = () => {
         duration={totalProfit > 0 ? 10 : 25}
         className="hover:shadow-lg transition-shadow"
       >
-        <div className="relative overflow-hidden w-full rounded-xl p-3 sm:p-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Sof foyda</p>
-              <p className={`text-lg sm:text-2xl font-bold mt-1 ${totalProfit > 0 ? "text-amber-600" : "text-gray-400"}`}>
+        <div className="relative overflow-hidden w-full rounded-xl p-2 sm:p-4 min-w-0">
+          <div className="flex items-start justify-between gap-1 sm:gap-2">
+            <div className="min-w-0">
+              <p className="text-[9px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Sof foyda</p>
+              <p className={`text-sm sm:text-2xl font-bold mt-0.5 sm:mt-1 tabular-nums truncate ${totalProfit > 0 ? "text-amber-600" : "text-gray-400"}`}>
                 {totalProfit > 0 ? formatUZS(totalProfit) : "0 so'm"}
               </p>
-              <p className="text-xs text-gray-500 mt-1">
-                {totalRevenue > 0 ? `Marja: ${((totalProfit / totalRevenue) * 100).toFixed(1)}%` : "Tan narxini kiriting"}
+              <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">
+                {totalRevenue > 0 ? `Marja: ${((totalProfit / totalRevenue) * 100).toFixed(1)}%` : "Tan narxni kiriting"}
               </p>
             </div>
-            <div className={`flex items-center justify-center size-9 sm:size-11 rounded-xl ${totalProfit > 0 ? "bg-amber-100" : "bg-gray-100"}`}>
-              <DollarSign className={`size-5 ${totalProfit > 0 ? "text-amber-600" : "text-gray-400"}`} />
+            <div className={`flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl shrink-0 ${totalProfit > 0 ? "bg-amber-100" : "bg-gray-100"}`}>
+              <DollarSign className={`size-3.5 sm:size-5 ${totalProfit > 0 ? "text-amber-600" : "text-gray-400"}`} />
             </div>
           </div>
         </div>
@@ -196,15 +196,15 @@ const DashboardSummary = () => {
         className="hover:shadow-lg transition-shadow"
       >
         <Link href="/admin/products" className="block">
-          <div className="relative overflow-hidden w-full rounded-xl p-3 sm:p-4">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Kam qolgan mahsulotlar</p>
-                <p className={`text-2xl sm:text-3xl font-bold mt-1 ${lowStockCount > 0 ? "text-red-600" : "text-green-600"}`}>
+          <div className="relative overflow-hidden w-full rounded-xl p-2 sm:p-4 min-w-0">
+            <div className="flex items-start justify-between gap-1 sm:gap-2">
+              <div className="min-w-0">
+                <p className="text-[9px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Kam qolgan</p>
+                <p className={`text-lg sm:text-3xl font-bold mt-0.5 sm:mt-1 tabular-nums ${lowStockCount > 0 ? "text-red-600" : "text-green-600"}`}>
                   {lowStockCount}
                 </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {lowStockCount > 0 ? "Omborda 5 tadan kam" : "Hammasi yetarli"}
+                <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">
+                  {lowStockCount > 0 ? "5 tadan kam" : "Hammasi yetarli"}
                 </p>
                 {lowStockCount > 0 && (
                   <button
@@ -214,14 +214,14 @@ const DashboardSummary = () => {
                       exportLowStockProducts(products);
                       toast.success(`${lowStockCount} ta mahsulot eksport qilindi`);
                     }}
-                    className="mt-1 text-[10px] text-gray-400 hover:text-gray-600 underline"
+                    className="mt-0.5 sm:mt-1 text-[10px] text-gray-400 hover:text-gray-600 underline"
                   >
-                    Excel yuklab olish
+                    Excel
                   </button>
                 )}
               </div>
-              <div className={`flex items-center justify-center size-9 sm:size-11 rounded-xl ${lowStockCount > 0 ? "bg-red-100" : "bg-green-100"}`}>
-                <AlertTriangle className={`size-5 ${lowStockCount > 0 ? "text-red-600" : "text-green-600"}`} />
+              <div className={`flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl shrink-0 ${lowStockCount > 0 ? "bg-red-100" : "bg-green-100"}`}>
+                <AlertTriangle className={`size-3.5 sm:size-5 ${lowStockCount > 0 ? "text-red-600" : "text-green-600"}`} />
               </div>
             </div>
           </div>
