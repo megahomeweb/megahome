@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { collection, query, onSnapshot, doc, increment, Timestamp, where, addDoc, runTransaction, orderBy } from "firebase/firestore";
+import { collection, query, onSnapshot, doc, increment, Timestamp, where, addDoc, runTransaction, orderBy, deleteDoc, getDocs } from "firebase/firestore";
 import { fireDB, auth } from '@/firebase/config';
 import { Order, OrderStatus, ProductT } from "@/lib/types";
 
@@ -62,6 +62,8 @@ interface StoreState {
   createOrder: (input: CreateOrderInput) => Promise<CreateOrderResult | CreateOrderError>;
   updateOrderStatus: (orderId: string, status: OrderStatus) => Promise<void>;
   bulkUpdateOrderStatus: (orderIds: string[], status: OrderStatus) => Promise<{ success: number; failed: number }>;
+  deleteOrder: (orderId: string) => Promise<void>;
+  bulkDeleteOrders: (orderIds: string[]) => Promise<{ success: number; failed: number }>;
   fetchAllOrders: () => void;
   fetchUserOrders: (userUid: string) => void;
   cleanup: () => void;
@@ -255,6 +257,111 @@ export const useOrderStore = create<StoreState>((set, get) => ({
         orderIds.includes(o.id) ? { ...o, status } : o
       ),
     }));
+    return results;
+  },
+
+  /**
+   * Permanently delete an order. If the order had stock decremented (i.e.
+   * stockReserved && status !== 'bekor_qilindi'), restore the stock first
+   * inside a transaction so we never delete an order while leaving
+   * inventory phantom-low. Cancelled orders had stock restored already, so
+   * we just delete those.
+   *
+   * Also voids any nasiya entries linked to the order (best-effort,
+   * post-tx, since `where(...)` queries can't run inside a tx).
+   */
+  deleteOrder: async (orderId: string) => {
+    const orderRef = doc(fireDB, "orders", orderId);
+    const movementsToLog: Array<{
+      productId: string;
+      productTitle: string;
+      quantity: number;
+      stockBefore: number;
+      stockAfter: number;
+    }> = [];
+
+    await runTransaction(fireDB, async (tx) => {
+      const orderSnap = await tx.get(orderRef);
+      if (!orderSnap.exists()) return;
+
+      const orderData = orderSnap.data();
+      const status = (orderData.status ?? 'yangi') as OrderStatus;
+      const stockReserved = orderData.stockReserved === true;
+      const basketItems = (orderData.basketItems ?? []) as ProductT[];
+
+      // Restore stock if the order is currently holding it. We DO NOT
+      // restore for cancelled orders (stock was already returned when the
+      // order was cancelled).
+      const shouldRestoreStock =
+        status !== 'bekor_qilindi' &&
+        (stockReserved || status === 'yetkazildi');
+
+      const productRefs = shouldRestoreStock
+        ? basketItems.filter((i) => i.id).map((i) => doc(fireDB, 'products', i.id))
+        : [];
+      const productSnaps = await Promise.all(productRefs.map((r) => tx.get(r)));
+
+      if (shouldRestoreStock) {
+        for (let i = 0; i < productSnaps.length; i++) {
+          const snap = productSnaps[i];
+          const item = basketItems[i];
+          const before = snap.exists() ? (snap.data().stock ?? 0) : 0;
+          tx.update(productRefs[i], { stock: increment(item.quantity) });
+          movementsToLog.push({
+            productId: item.id,
+            productTitle: item.title || '',
+            quantity: item.quantity,
+            stockBefore: before,
+            stockAfter: before + item.quantity,
+          });
+        }
+      }
+
+      tx.delete(orderRef);
+    });
+
+    // Audit log
+    for (const m of movementsToLog) {
+      addDoc(collection(fireDB, 'stockMovements'), {
+        productId: m.productId,
+        productTitle: m.productTitle,
+        type: 'qaytarish',
+        quantity: m.quantity,
+        stockBefore: m.stockBefore,
+        stockAfter: m.stockAfter,
+        reason: 'Buyurtma oʻchirildi',
+        reference: orderId,
+        timestamp: Timestamp.now(),
+      }).catch((err) => console.error('stockMovement log failed:', err));
+    }
+
+    // Void nasiya entries linked to this order. Done outside the tx
+    // because where()-queries can't run inside one. Best-effort: a
+    // failure here doesn't roll back the order delete (which already
+    // committed), but the operator sees a console error.
+    try {
+      const nasiyaQ = query(collection(fireDB, 'nasiya'), where('orderId', '==', orderId));
+      const nasiyaSnap = await getDocs(nasiyaQ);
+      for (const d of nasiyaSnap.docs) {
+        await deleteDoc(d.ref);
+      }
+    } catch (err) {
+      console.error('Failed to void nasiya entries on order delete:', err);
+    }
+  },
+
+  bulkDeleteOrders: async (orderIds: string[]) => {
+    const results = { success: 0, failed: 0 };
+    const deleteFn = get().deleteOrder;
+    for (const orderId of orderIds) {
+      try {
+        await deleteFn(orderId);
+        results.success++;
+      } catch (err) {
+        console.error(`bulkDeleteOrders: order ${orderId} failed`, err);
+        results.failed++;
+      }
+    }
     return results;
   },
 

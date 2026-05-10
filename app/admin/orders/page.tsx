@@ -19,7 +19,7 @@ import { ORDER_STATUSES, getStatusInfo } from '@/lib/orderStatus';
 import { OrderStatus } from '@/lib/types';
 import toast from 'react-hot-toast';
 import { exportOrdersToExcel } from '@/lib/exportExcel';
-import { CheckCheck, Download, FileText, X, Send, MessageCircle } from 'lucide-react';
+import { CheckCheck, Download, FileText, X, Send, MessageCircle, Filter, Trash2 } from 'lucide-react';
 import { shareOrderToTelegram, shareOrderToWhatsApp, copyOrderText } from '@/lib/shareOrder';
 import { OrderListSkeleton } from '@/components/admin/skeletons/ListSkeletons';
 import { generateDeliverySheet } from '@/lib/generateDeliverySheet';
@@ -27,6 +27,12 @@ import BulkOrderStatusModal from '@/components/admin/BulkOrderStatusModal';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { telegramNotify } from '@/lib/telegram/notify-client';
+
+// Filter options for the orders page. `all` is a synthetic value meaning
+// "no constraint on this field"; the page short-circuits each predicate
+// when its filter is `all`.
+type SourceFilter = 'all' | 'pos' | 'web' | 'admin' | 'telegram';
+type DateFilter = 'all' | 'today' | 'week' | 'month';
 
 const StatusBadge = ({ status }: { status?: string }) => {
   const info = getStatusInfo(status);
@@ -38,14 +44,39 @@ const StatusBadge = ({ status }: { status?: string }) => {
 };
 
 const Orders = () => {
-  const { orders, fetchAllOrders, loadingOrders, updateOrderStatus, bulkUpdateOrderStatus } = useOrderStore();
+  const { orders, fetchAllOrders, loadingOrders, updateOrderStatus, bulkUpdateOrderStatus, deleteOrder, bulkDeleteOrders } = useOrderStore();
   const [search, setSearch] = useState('');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [showBulkStatus, setShowBulkStatus] = useState(false);
   const [confirmingAll, setConfirmingAll] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  // Filters
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<Set<OrderStatus | 'yangi'>>(new Set());
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+  const [dateFilter, setDateFilter] = useState<DateFilter>('all');
 
   const newOrderCount = useMemo(() => orders.filter(o => o.status === 'yangi' || !o.status).length, [orders]);
+
+  const dateThreshold = useMemo(() => {
+    if (dateFilter === 'all') return 0;
+    const now = new Date();
+    if (dateFilter === 'today') {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      return d.getTime();
+    }
+    if (dateFilter === 'week') return now.getTime() - 7 * 24 * 60 * 60 * 1000;
+    if (dateFilter === 'month') return now.getTime() - 30 * 24 * 60 * 60 * 1000;
+    return 0;
+  }, [dateFilter]);
+
+  const activeFilterCount =
+    (statusFilter.size > 0 ? 1 : 0) +
+    (sourceFilter !== 'all' ? 1 : 0) +
+    (dateFilter !== 'all' ? 1 : 0);
 
   // Single source of truth for "what the operator currently sees". The Excel
   // export was previously dumping the entire `orders` collection regardless
@@ -53,14 +84,84 @@ const Orders = () => {
   // them their order history, the resulting download still contained every
   // order in the system. Now both the list and the export consume this.
   const filteredOrders = useMemo(() => {
-    if (!search.trim()) return orders;
-    const q = search.toLowerCase();
-    return orders.filter(o =>
-      (o.clientName ? matchesSearch(o.clientName, search) : false) ||
-      (o.clientPhone ? o.clientPhone.includes(search) : false) ||
-      (o.id ? o.id.toLowerCase().includes(q) : false)
-    );
-  }, [orders, search]);
+    let list = orders;
+    // Search
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(o =>
+        (o.clientName ? matchesSearch(o.clientName, search) : false) ||
+        (o.clientPhone ? o.clientPhone.includes(search) : false) ||
+        (o.id ? o.id.toLowerCase().includes(q) : false)
+      );
+    }
+    // Status filter (multi-select)
+    if (statusFilter.size > 0) {
+      list = list.filter(o => statusFilter.has((o.status ?? 'yangi') as OrderStatus));
+    }
+    // Source filter
+    if (sourceFilter !== 'all') {
+      list = list.filter(o => (o.source ?? 'web') === sourceFilter);
+    }
+    // Date filter
+    if (dateThreshold > 0) {
+      list = list.filter(o => {
+        const ts = o.date?.seconds ? o.date.seconds * 1000 : 0;
+        return ts >= dateThreshold;
+      });
+    }
+    return list;
+  }, [orders, search, statusFilter, sourceFilter, dateThreshold]);
+
+  const toggleStatusFilter = (s: OrderStatus) => {
+    setStatusFilter(prev => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s);
+      else next.add(s);
+      return next;
+    });
+  };
+
+  const clearAllFilters = () => {
+    setStatusFilter(new Set());
+    setSourceFilter('all');
+    setDateFilter('all');
+  };
+
+  const handleDeleteOrder = async (orderId: string, clientName: string) => {
+    if (!window.confirm(`"${clientName}" buyurtmasini oʻchirishni istaysizmi? Bu amalni bekor qilib boʻlmaydi. Agar buyurtma bekor qilinmagan boʻlsa, omborga qaytariladi.`)) return;
+    setDeletingId(orderId);
+    try {
+      await deleteOrder(orderId);
+      toast.success("Buyurtma oʻchirildi");
+      setSelectedOrderIds(prev => {
+        const next = new Set(prev);
+        next.delete(orderId);
+        return next;
+      });
+    } catch (err) {
+      console.error(err);
+      toast.error("Oʻchirishda xatolik");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedOrderIds.size === 0) return;
+    if (!window.confirm(`${selectedOrderIds.size} ta buyurtma oʻchiriladi. Bekor qilinmaganlari uchun ombor qaytariladi. Davom etamizmi?`)) return;
+    setBulkDeleting(true);
+    try {
+      const ids = Array.from(selectedOrderIds);
+      const result = await bulkDeleteOrders(ids);
+      toast.success(`${result.success} ta oʻchirildi${result.failed > 0 ? `, ${result.failed} ta xatolik` : ''}`);
+      setSelectedOrderIds(new Set());
+    } catch (err) {
+      console.error(err);
+      toast.error("Toʻplam oʻchirishda xatolik");
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
 
   const handleConfirmAllNew = async () => {
     const newOrders = orders.filter(o => o.status === 'yangi' || !o.status);
@@ -137,6 +238,21 @@ const Orders = () => {
         </Button>
         <Button
           variant="outline"
+          className={`rounded-xl cursor-pointer text-xs sm:text-sm h-9 sm:h-10 gap-1 sm:gap-1.5 px-2.5 sm:px-4 ${
+            activeFilterCount > 0 ? 'border-blue-400 bg-blue-50 text-blue-700' : ''
+          }`}
+          onClick={() => setShowFilterPanel(v => !v)}
+        >
+          <Filter className="size-4" />
+          <span>Filter</span>
+          {activeFilterCount > 0 && (
+            <span className="inline-flex items-center justify-center size-4 text-[10px] font-bold rounded-full bg-blue-600 text-white">
+              {activeFilterCount}
+            </span>
+          )}
+        </Button>
+        <Button
+          variant="outline"
           className="rounded-xl cursor-pointer text-xs sm:text-sm h-9 sm:h-10 gap-1 sm:gap-1.5 px-2.5 sm:px-4"
           onClick={() => {
             if (filteredOrders.length === 0) {
@@ -153,6 +269,78 @@ const Orders = () => {
           <Download className="size-4" /> Excel
         </Button>
       </div>
+
+      {/* Filter panel — collapsible, no horizontal scroll on mobile.
+          Status chips wrap; date + source are short selects so they fit
+          inline on phones. Designed to be tap-friendly: every chip is
+          ≥36px tall. */}
+      {showFilterPanel && (
+        <div data-no-swipe className="mx-3 sm:mx-4 mb-3 p-3 sm:p-4 bg-white border border-gray-200 rounded-xl space-y-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Holat</p>
+            <div className="flex flex-wrap gap-1.5">
+              {ORDER_STATUSES.map((s) => {
+                const active = statusFilter.has(s.value as OrderStatus);
+                return (
+                  <button
+                    key={s.value}
+                    onClick={() => toggleStatusFilter(s.value as OrderStatus)}
+                    className={`h-9 px-3 rounded-lg text-xs font-semibold transition border ${
+                      active
+                        ? 'border-gray-900 bg-gray-900 text-white'
+                        : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Manba</p>
+              <select
+                value={sourceFilter}
+                onChange={(e) => setSourceFilter(e.target.value as SourceFilter)}
+                className="w-full h-10 px-3 rounded-lg border border-gray-300 bg-white text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-100"
+              >
+                <option value="all">Hammasi</option>
+                <option value="pos">POS (sotuv nuqtasi)</option>
+                <option value="web">Web sayt</option>
+                <option value="telegram">Telegram</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Sana</p>
+              <select
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value as DateFilter)}
+                className="w-full h-10 px-3 rounded-lg border border-gray-300 bg-white text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-100"
+              >
+                <option value="all">Hammasi</option>
+                <option value="today">Bugun</option>
+                <option value="week">Oxirgi 7 kun</option>
+                <option value="month">Oxirgi 30 kun</option>
+              </select>
+            </div>
+          </div>
+          {activeFilterCount > 0 && (
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-xs text-gray-500">
+                {filteredOrders.length} ta buyurtma topildi
+              </span>
+              <button
+                onClick={clearAllFilters}
+                className="text-xs font-semibold text-blue-600 hover:text-blue-800"
+              >
+                Filtrlarni tozalash
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       {loadingOrders ? (
           <div className="px-4 pb-4">
             <OrderListSkeleton rows={6} />
@@ -255,6 +443,16 @@ const Orders = () => {
                           }} className="rounded-lg cursor-pointer text-xs h-7 gap-1 shrink-0">
                           <Download className="size-3" /> Nusxalash
                         </Button>
+                        <Button
+                          variant="outline"
+                          type="button"
+                          disabled={deletingId === order.id}
+                          onClick={() => handleDeleteOrder(order.id, order.clientName)}
+                          className="rounded-lg cursor-pointer text-xs h-7 gap-1 border-red-300 bg-red-50 text-red-700 hover:bg-red-100 shrink-0 disabled:opacity-50"
+                        >
+                          <Trash2 className="size-3" />
+                          {deletingId === order.id ? "Oʻchirilmoqda..." : "Oʻchirish"}
+                        </Button>
                       </div>
                       {/* Financials — 2-col grid on mobile, inline on desktop */}
                       <div className="grid grid-cols-2 sm:flex sm:items-center sm:gap-4 sm:justify-end mt-2 pt-2 border-t border-gray-100 gap-x-3 gap-y-1.5 text-right">
@@ -353,13 +551,23 @@ const Orders = () => {
         })()}
 
       {selectedOrderIds.size > 0 && (
-        <div className="fixed bottom-20 lg:bottom-6 left-2 right-2 lg:left-1/2 lg:right-auto lg:-translate-x-1/2 z-50 flex items-center gap-2 sm:gap-3 bg-gray-900 text-white px-3 sm:px-5 py-2.5 sm:py-3 rounded-2xl shadow-2xl border border-gray-700 pb-[max(0.625rem,env(safe-area-inset-bottom))] lg:pb-3"
+        <div className="fixed bottom-20 lg:bottom-6 left-2 right-2 lg:left-1/2 lg:right-auto lg:-translate-x-1/2 z-50 flex items-center gap-1.5 sm:gap-3 bg-gray-900 text-white px-3 sm:px-5 py-2.5 sm:py-3 rounded-2xl shadow-2xl border border-gray-700 pb-[max(0.625rem,env(safe-area-inset-bottom))] lg:pb-3 overflow-x-auto scrollbar-hide"
           style={{ maxWidth: "calc(100vw - 1rem)" }}>
-          <span className="text-sm font-medium mr-2">{selectedOrderIds.size} ta tanlangan</span>
-          <Button size="sm" variant="ghost" onClick={() => setShowBulkStatus(true)} className="text-blue-400 hover:text-blue-300 hover:bg-gray-800 gap-1.5 text-xs btn-press glow-blue">
-            Statusni o&apos;zgartirish
+          <span className="text-xs sm:text-sm font-medium mr-1 sm:mr-2 shrink-0">{selectedOrderIds.size} ta</span>
+          <Button size="sm" variant="ghost" onClick={() => setShowBulkStatus(true)} className="text-blue-400 hover:text-blue-300 hover:bg-gray-800 gap-1.5 text-xs btn-press glow-blue shrink-0">
+            Statusni oʻzgartirish
           </Button>
-          <button onClick={() => setSelectedOrderIds(new Set())} className="ml-2 p-1 rounded-lg hover:bg-gray-800">
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={bulkDeleting}
+            onClick={handleBulkDelete}
+            className="text-red-400 hover:text-red-300 hover:bg-gray-800 gap-1.5 text-xs btn-press shrink-0 disabled:opacity-50"
+          >
+            <Trash2 className="size-3.5" />
+            {bulkDeleting ? "Oʻchirilmoqda..." : "Oʻchirish"}
+          </Button>
+          <button onClick={() => setSelectedOrderIds(new Set())} className="ml-1 sm:ml-2 p-1 rounded-lg hover:bg-gray-800 shrink-0" aria-label="Bekor qilish">
             <X className="size-4 text-gray-400" />
           </button>
         </div>
