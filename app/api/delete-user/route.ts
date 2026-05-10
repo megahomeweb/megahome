@@ -1,6 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminApp } from '@/lib/firebase-admin';
+import { isAdminEmail } from '@/lib/admin-config';
 
+/**
+ * Admin gate. Previously this verified admin status by reading the
+ * `role` field from the caller's Firestore user doc — but that field
+ * is owner-writable (firestore.rules now blocks role mutation, but
+ * older rules let any user `updateDoc(myDoc, {role: 'admin'})` and
+ * then call this endpoint to delete arbitrary users). We now gate on
+ * the verified email claim from the Firebase ID token, matched
+ * against the hardcoded admin email — there is exactly one admin
+ * identity and it cannot be self-promoted.
+ */
 async function verifyAdmin(req: NextRequest): Promise<boolean> {
   const authHeader = req.headers.get('Authorization');
   if (!authHeader?.startsWith('Bearer ')) return false;
@@ -9,10 +20,7 @@ async function verifyAdmin(req: NextRequest): Promise<boolean> {
     const token = authHeader.split('Bearer ')[1];
     const adminApp = getAdminApp();
     const decodedToken = await adminApp.auth().verifyIdToken(token);
-
-    // Check if user has admin role in Firestore
-    const userDoc = await adminApp.firestore().collection('user').doc(decodedToken.uid).get();
-    return userDoc.exists && userDoc.data()?.role === 'admin';
+    return isAdminEmail(decodedToken.email);
   } catch {
     return false;
   }

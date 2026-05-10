@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as admin from 'firebase-admin';
 import { getAdminApp } from '@/lib/firebase-admin';
+import { isAdminEmail } from '@/lib/admin-config';
 
 /**
  * Server-validated order creation.
@@ -108,30 +109,64 @@ export async function POST(req: NextRequest) {
       } catch (err) {
         const code = (err as { code?: number | string })?.code;
         if (code === 6 || code === 'already-exists') {
-          // Duplicate retry — return a 200 with a flag. We don't reconstruct
-          // the original order body; clients that need the orderId should
-          // store it locally on first success.
+          // Duplicate retry — look up the original order we wrote on the
+          // first call and return the SAME response shape so the client
+          // (POS success screen, Modal.tsx) doesn't render `№ undefined`.
+          // We tagged each idempotencyKeys doc with the resulting orderId
+          // post-tx for exactly this reason (writes happen below the
+          // transaction commit; see end of POST). When the original
+          // doc has no orderId yet (race: two retries land before the
+          // first commits), fall back to the dedup flag.
+          try {
+            const keyDoc = await adminApp.firestore().collection('idempotencyKeys').doc(k).get();
+            const data = keyDoc.data() ?? {};
+            const orderId = typeof data.orderId === 'string' ? data.orderId : null;
+            if (orderId) {
+              const orderSnap = await adminApp.firestore().collection('orders').doc(orderId).get();
+              if (orderSnap.exists) {
+                const o = orderSnap.data() ?? {};
+                return NextResponse.json({
+                  ok: true,
+                  dedup: true,
+                  orderId,
+                  totalPrice: o.totalPrice ?? 0,
+                  totalQuantity: o.totalQuantity ?? 0,
+                  basketItems: o.basketItems ?? [],
+                  priceChanged: false,
+                  nasiyaIds: [],
+                });
+              }
+            }
+          } catch (lookupErr) {
+            console.error('[orders/create] dedup lookup failed:', lookupErr);
+          }
           return NextResponse.json({ ok: true, dedup: true });
         }
         throw err;
       }
     }
-    void claimedIdemKey;
+    // claimedIdemKey is consumed at the bottom of this handler — see
+    // post-commit "stamp the idempotency key with the resulting orderId".
     let callerUid: string;
     let callerIsAdmin = false;
+    let callerEmail: string | null = null;
     try {
       const token = authHeader.split('Bearer ')[1];
       const decoded = await adminApp.auth().verifyIdToken(token);
       callerUid = decoded.uid;
+      callerEmail = decoded.email ?? null;
     } catch {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
     const db = adminApp.firestore();
 
-    // Look up caller role from Firestore (source of truth)
-    const callerDoc = await db.collection('user').doc(callerUid).get();
-    callerIsAdmin = callerDoc.exists && callerDoc.data()?.role === 'admin';
+    // Admin identity is gated on the verified Firebase Auth email claim,
+    // not on the user-doc `role` field (owner-writable historically).
+    // This single check replaces the prior pattern that read role from
+    // Firestore — under the old code a user who mutated their own doc
+    // to role='admin' could place orders attributed to other customers.
+    callerIsAdmin = isAdminEmail(callerEmail);
 
     // ── Input parse + validate ─────────────────────────
     let body: RequestBody;
@@ -153,7 +188,14 @@ export async function POST(req: NextRequest) {
     if (typeof clientName !== 'string' || clientName.trim().length < 1) {
       return NextResponse.json({ error: 'clientName required' }, { status: 400 });
     }
-    if (typeof clientPhone !== 'string' || clientPhone.trim().length < 4) {
+    // Walk-in POS sales (cash, no customer record) often have no phone.
+    // Allow an empty phone for source==='pos' specifically; for web /
+    // telegram / admin orders we still require a callable number.
+    if (typeof clientPhone !== 'string') {
+      return NextResponse.json({ error: 'clientPhone required' }, { status: 400 });
+    }
+    const phoneRequired = source !== 'pos';
+    if (phoneRequired && clientPhone.trim().length < 4) {
       return NextResponse.json({ error: 'clientPhone required' }, { status: 400 });
     }
 
@@ -570,6 +612,17 @@ export async function POST(req: NextRequest) {
       await Promise.all(writes);
     } catch (err) {
       console.error('stockMovement log failed (non-fatal):', err);
+    }
+
+    // Stamp the idempotency key with the resulting orderId so a retry
+    // (network flap on the client) can fetch the original order and
+    // return the same shape as the first call. Without this, the
+    // POS / web success screen renders "№ undefined" on retry.
+    if (claimedIdemKey) {
+      db.collection('idempotencyKeys').doc(claimedIdemKey).set(
+        { orderId: txResult.orderId },
+        { merge: true },
+      ).catch((err) => console.error('[orders/create] idem stamp failed:', err));
     }
 
     return NextResponse.json({

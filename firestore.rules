@@ -45,11 +45,30 @@ service cloud.firestore {
     // - READ access: previously `allow read: if isAuth()` — any logged-in
     //   customer could enumerate every other customer's phone/email (PII
     //   leak). Now restricted to OWNER or STAFF (admin/manager).
+    // User profile updates: owners can update their OWN profile, but
+    // CANNOT change role / phone / email / uid. Without this lock, a
+    // signed-in customer could `updateDoc(myDoc, { role: 'admin' })` and
+    // then call /api/orders/create with `targetUserUid` to place orders
+    // attributed to other customers, or call /api/delete-user to wipe
+    // the user collection. Two server routes (orders/create:134,
+    // customers/create:54, delete-user) currently read role from this
+    // doc as the gate — locking the field down here removes the
+    // self-promotion vector without needing to ship every server fix
+    // simultaneously.
+    //
+    // Phone is also locked: nasiya entries and Telegram ref handling
+    // dedupe on phone, so a customer rewriting their own phone could
+    // hijack another customer's debt or referral chain.
     match /user/{userId} {
       allow read: if isOwner(userId) || isStaff();
       allow create: if isOwner(userId)
         || (isAdmin() && request.resource.data.role == 'user');
-      allow update: if isOwner(userId) || isAdmin();
+      allow update: if (isOwner(userId)
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.phone == resource.data.phone
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.uid == resource.data.uid)
+        || isAdmin();
       allow delete: if isAdmin();
     }
 
@@ -124,8 +143,14 @@ service cloud.firestore {
 
     // Promo codes — admin manages from /admin/promo, server applies at order
     // commit. Clients shouldn't write (would let users mint codes for self).
+    // Read locked to admin: previously `allow read: if isAuth()` let any
+    // signed-in customer enumerate every code, value, expiry, and the
+    // `usedBy[uid]` map (PII — tells you which other customers redeemed
+    // what). Customers redeem by submitting the code STRING to
+    // /api/orders/create which validates server-side; they never need
+    // direct read access.
     match /promoCodes/{codeId} {
-      allow read: if isAuth();
+      allow read: if isAdmin();
       allow create, update, delete: if isAdmin();
     }
 

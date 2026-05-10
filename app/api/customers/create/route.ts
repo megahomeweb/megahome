@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminApp } from '@/lib/firebase-admin';
+import { isAdminEmail } from '@/lib/admin-config';
 
 /**
  * Admin-only customer creation (POS / admin panel).
@@ -38,21 +39,24 @@ export async function POST(req: NextRequest) {
 
     const adminApp = getAdminApp();
     let callerUid: string;
+    let callerEmail: string | null = null;
     try {
       const token = authHeader.split('Bearer ')[1];
       const decoded = await adminApp.auth().verifyIdToken(token);
       callerUid = decoded.uid;
+      callerEmail = decoded.email ?? null;
     } catch {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
     const db = adminApp.firestore();
 
-    // Verify caller is admin (source of truth: Firestore role)
-    const callerDoc = await db.collection('user').doc(callerUid).get();
-    const callerRole = callerDoc.exists ? callerDoc.data()?.role : null;
-    if (callerRole !== 'admin' && callerRole !== 'manager') {
-      return NextResponse.json({ error: 'Faqat admin/menejer mijoz qoʻsha oladi' }, { status: 403 });
+    // Admin gate: hardcoded email claim (verified by Firebase Auth),
+    // NOT the Firestore `role` field (which is owner-writable in older
+    // rules and the basis of a self-promotion attack). Manager fallback
+    // intentionally removed here — customer creation is admin-only.
+    if (!isAdminEmail(callerEmail)) {
+      return NextResponse.json({ error: 'Faqat admin mijoz qoʻsha oladi' }, { status: 403 });
     }
 
     // ── Parse + validate body ────────────────────────────
@@ -84,6 +88,11 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Optional: dedupe by phone ────────────────────────
+    // Returns ONLY the existing uid + name on duplicate. Previously this
+    // also leaked email + role + creation time, which would have been a
+    // PII enumeration oracle if we ever broaden this endpoint to non-admin
+    // staff. With the admin-only gate above the leak is moot, but the
+    // tighter response shape is the right shape regardless.
     if (phone) {
       const existing = await db.collection('user').where('phone', '==', phone).limit(1).get();
       if (!existing.empty) {
@@ -98,8 +107,8 @@ export async function POST(req: NextRequest) {
               uid: doc.id,
               name: String(data.name ?? ''),
               phone: String(data.phone ?? ''),
-              email: data.email ?? null,
-              role: String(data.role ?? 'user'),
+              email: null,
+              role: 'user',
               time: data.time?.toMillis?.() ?? Date.now(),
               date: String(data.date ?? new Date().toLocaleDateString('uz-UZ')),
             },

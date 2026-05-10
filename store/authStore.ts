@@ -108,6 +108,26 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: async () => {
+        // Tear down every Firestore live listener BEFORE we sign out.
+        // Otherwise: onSnapshot keeps firing against a stale auth context
+        // for several seconds, the rules deny the reads, and the operator
+        // sees "Missing or insufficient permissions" errors in the console
+        // after every logout. Lazy-imported to avoid a circular import.
+        if (typeof window !== 'undefined') {
+          try {
+            const { useOrderStore } = await import('@/store/useOrderStore');
+            useOrderStore.getState().cleanup();
+          } catch {}
+          try {
+            const useProductStore = (await import('@/store/useProductStore')).default as
+              { getState: () => { cleanup?: () => void } };
+            useProductStore.getState().cleanup?.();
+          } catch {}
+          try {
+            const { useNotificationStore } = await import('@/store/useNotificationStore');
+            (useNotificationStore.getState() as { stopListening?: () => void }).stopListening?.();
+          } catch {}
+        }
         try {
           await signOut(auth);
         } catch (error) {
