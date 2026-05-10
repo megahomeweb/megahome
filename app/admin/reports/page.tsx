@@ -86,10 +86,16 @@ const ReportsPage = () => {
 
     const totalProfit = totalRevenue - totalCost;
     const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
-    const topProducts = Object.values(productProfitMap)
-      .map((p) => ({ ...p, profit: p.revenue - p.cost, margin: p.revenue > 0 ? ((p.revenue - p.cost) / p.revenue) * 100 : 0 }))
-      .sort((a, b) => b.profit - a.profit)
-      .slice(0, 10);
+    const allProducts = Object.values(productProfitMap)
+      .map((p) => ({ ...p, profit: p.revenue - p.cost, margin: p.revenue > 0 ? ((p.revenue - p.cost) / p.revenue) * 100 : 0 }));
+    const topProducts = [...allProducts].sort((a, b) => b.profit - a.profit).slice(0, 10);
+    // Loss-making products: where the cumulative cost exceeds the revenue
+    // for that product across the selected period. Most often this means
+    // the operator has costPrice > sale price on the product master (data
+    // entry mistake or a kirim weighted-avg pushed cost above the sale
+    // price). Surfacing these tells the operator EXACTLY which products
+    // are pulling Sof foyda negative — e.g. the "-16" the user spotted.
+    const lossProducts = allProducts.filter(p => p.profit < 0).sort((a, b) => a.profit - b.profit).slice(0, 10);
 
     return {
       totalOrders: completedCount + cancelledCount + pendingCount,
@@ -97,7 +103,7 @@ const ReportsPage = () => {
       cancelledCount,
       pendingCount,
       totalRevenue, totalCost, totalProfit, profitMargin,
-      totalItems, topProducts,
+      totalItems, topProducts, lossProducts,
     };
   }, [orders, period]);
 
@@ -162,9 +168,9 @@ const ReportsPage = () => {
             <p className="text-[11px] text-gray-400 mt-1">Yetkazilgan buyurtmalardan</p>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-3 sm:p-4">
+          <div className={`bg-white rounded-xl border p-3 sm:p-4 ${stats.totalProfit < 0 ? 'border-red-300 bg-red-50/30' : 'border-gray-200'}`}>
             <div className="flex items-center gap-2 mb-1">
-              <DollarSign className="size-4 text-amber-600" />
+              <DollarSign className={`size-4 ${stats.totalProfit < 0 ? 'text-red-600' : 'text-amber-600'}`} />
               <p className="text-xs text-gray-500 uppercase font-semibold">Sof foyda</p>
             </div>
             <p className={`text-2xl font-bold ${stats.totalProfit >= 0 ? 'text-amber-600' : 'text-red-600'}`}>
@@ -203,6 +209,83 @@ const ReportsPage = () => {
             <DailyOrdersChart orders={orders} days={period === 'today' ? 1 : period === 'week' ? 7 : period === 'month' ? 30 : 90} />
           </div>
         </div>
+
+        {/* ── Zarar oguh: products selling below cost ───────────────────
+            Surfaces the EXACT products responsible for negative profit.
+            Only renders when there are loss-making sales — otherwise
+            stays out of the way. Tells the operator "your KRESLO 004
+            cost 91, sold for 75, lost 16$" instead of just "-16$ Sof
+            foyda" with no clue what to fix. */}
+        {stats.lossProducts.length > 0 && (
+          <div className="bg-red-50 border border-red-200 rounded-xl overflow-hidden mb-4">
+            <div className="px-3 sm:px-4 py-2 sm:py-3 border-b border-red-200 flex items-center gap-2">
+              <TrendingDown className="size-4 text-red-600 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <h3 className="font-bold text-sm text-red-700">Zararli sotuvlar</h3>
+                <p className="text-[11px] text-red-600/80 mt-0.5">
+                  Tan narxi sotish narxidan baland mahsulotlar. Sof foydani manfiyga olib kelmoqda — narxni qayta tekshiring.
+                </p>
+              </div>
+            </div>
+            {/* Desktop table */}
+            <div data-no-swipe className="hidden sm:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-red-100/50">
+                  <tr>
+                    <th className="text-left px-4 py-2 font-medium text-red-800">#</th>
+                    <th className="text-left px-4 py-2 font-medium text-red-800">Mahsulot</th>
+                    <th className="text-right px-4 py-2 font-medium text-red-800">Sotildi</th>
+                    <th className="text-right px-4 py-2 font-medium text-red-800">Daromad</th>
+                    <th className="text-right px-4 py-2 font-medium text-red-800">Tan narxi</th>
+                    <th className="text-right px-4 py-2 font-medium text-red-800">Zarar</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.lossProducts.map((p, idx) => (
+                    <tr key={idx} className="border-t border-red-100 bg-white/60">
+                      <td className="px-4 py-2 text-red-700">{idx + 1}</td>
+                      <td className="px-4 py-2 font-medium text-red-900">{p.title}</td>
+                      <td className="px-4 py-2 text-right">{p.qty} ta</td>
+                      <td className="px-4 py-2 text-right text-gray-700">{formatUZS(p.revenue)}</td>
+                      <td className="px-4 py-2 text-right text-gray-700">{formatUZS(p.cost)}</td>
+                      <td className="px-4 py-2 text-right font-bold text-red-700">{formatUZS(p.profit)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {/* Mobile cards */}
+            <div className="sm:hidden divide-y divide-red-100">
+              {stats.lossProducts.map((p, idx) => (
+                <div key={idx} className="px-3 py-2.5 bg-white/60">
+                  <div className="flex items-start justify-between gap-2 mb-1.5">
+                    <div className="flex items-start gap-2 min-w-0 flex-1">
+                      <span className="text-xs text-red-400 shrink-0 mt-0.5 w-5">{idx + 1}.</span>
+                      <p className="text-sm font-semibold text-red-900 line-clamp-2 leading-snug">{p.title}</p>
+                    </div>
+                    <span className="text-xs font-bold shrink-0 px-1.5 py-0.5 rounded bg-red-200 text-red-800">
+                      {formatUZS(p.profit)}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1 ml-7 text-[11px]">
+                    <div>
+                      <p className="text-red-400">Sotildi</p>
+                      <p className="font-semibold text-gray-700">{p.qty} ta</p>
+                    </div>
+                    <div>
+                      <p className="text-red-400">Daromad</p>
+                      <p className="font-semibold text-gray-700 tabular-nums">{formatUZS(p.revenue)}</p>
+                    </div>
+                    <div>
+                      <p className="text-red-400">Tan narxi</p>
+                      <p className="font-semibold text-gray-700 tabular-nums">{formatUZS(p.cost)}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Top products by profit — desktop table, mobile cards */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">

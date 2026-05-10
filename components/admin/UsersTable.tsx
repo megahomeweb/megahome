@@ -11,6 +11,7 @@ import { updateDoc, doc } from 'firebase/firestore';
 import { fireDB, auth } from '@/firebase/config';
 import { useNotificationStore } from '@/store/useNotificationStore';
 import { formatUZS } from '@/lib/formatPrice';
+import { isCompletedSale, orderRevenue } from '@/lib/orderMath';
 import { matchesSearch } from '@/lib/searchMatch';
 import Link from 'next/link';
 import Pagination, { usePagination } from './Pagination';
@@ -56,7 +57,11 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
     };
   }, [fetchAllUsers]);
 
-  // Pre-compute order stats per user
+  // Pre-compute order stats per user. Uses the same `isCompletedSale +
+  // orderRevenue` definition that /admin/customers and the dashboard use,
+  // so the same customer's totalSpent is identical across all admin pages.
+  // Previously this counted gross totalPrice and only `yetkazildi` orders —
+  // missing POS sales and overstating discounted ones.
   const userStats = useMemo(() => {
     const stats: Record<string, { orderCount: number; totalSpent: number }> = {};
     for (const order of orders) {
@@ -64,8 +69,8 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
       if (!key) continue;
       if (!stats[key]) stats[key] = { orderCount: 0, totalSpent: 0 };
       stats[key].orderCount++;
-      if (order.status === 'yetkazildi') {
-        stats[key].totalSpent += order.totalPrice || 0;
+      if (isCompletedSale(order)) {
+        stats[key].totalSpent += orderRevenue(order);
       }
     }
     return stats;
