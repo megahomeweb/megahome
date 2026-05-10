@@ -102,5 +102,5 @@ export async function handleOrderDetail(chatId: number, orderId: string): Promis
 }
 
 function formatPriceInline(price: string): string {
-  return '$' + Number(price).toLocaleString('en-US');
+  return Number(price).toLocaleString('en-US') + '$';
 }

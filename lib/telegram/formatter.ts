@@ -14,7 +14,7 @@ export function escapeHtml(text: string): string {
 }
 
 function formatPrice(price: string | number): string {
-  return '$' + Number(price).toLocaleString('en-US');
+  return Number(price).toLocaleString('en-US') + '$';
 }
 
 export function formatWelcome(userName: string): string {

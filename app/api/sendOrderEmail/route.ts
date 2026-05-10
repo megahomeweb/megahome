@@ -124,7 +124,7 @@ export async function POST(req: Request) {
         'Mahsulotlar:',
         orderDetails,
         '',
-        `Umumiy narx: $${totalPrice.toLocaleString('en-US')}`,
+        `Umumiy narx: ${totalPrice.toLocaleString('en-US')}$`,
         `Umumiy miqdor: ${totalQuantity} ta`,
       ].join('\n'),
     };

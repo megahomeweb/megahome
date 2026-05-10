@@ -152,7 +152,7 @@ const DashboardSummary = () => {
             <div className="min-w-0">
               <p className="text-[11px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Daromad</p>
               <p className={`text-sm sm:text-2xl font-bold mt-0.5 sm:mt-1 tabular-nums truncate ${totalRevenue > 0 ? "text-green-600" : "text-gray-400"}`}>
-                {totalRevenue > 0 ? formatUZS(totalRevenue) : '$0'}
+                {totalRevenue > 0 ? formatUZS(totalRevenue) : '0$'}
               </p>
               <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">Yetkazilganlardan</p>
             </div>
@@ -175,7 +175,7 @@ const DashboardSummary = () => {
             <div className="min-w-0">
               <p className="text-[11px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Sof foyda</p>
               <p className={`text-sm sm:text-2xl font-bold mt-0.5 sm:mt-1 tabular-nums truncate ${totalProfit > 0 ? "text-amber-600" : "text-gray-400"}`}>
-                {totalProfit > 0 ? formatUZS(totalProfit) : '$0'}
+                {totalProfit > 0 ? formatUZS(totalProfit) : '0$'}
               </p>
               <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">
                 {totalRevenue > 0 ? `Marja: ${((totalProfit / totalRevenue) * 100).toFixed(1)}%` : "Tan narxni kiriting"}

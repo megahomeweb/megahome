@@ -219,7 +219,7 @@ function PromoCard({ code, onToggle, onDelete }: { code: PromoDoc; onToggle: () 
           <span className="text-3xl font-extrabold text-blue-600 tabular-nums">−{code.value}%</span>
         ) : (
           <>
-            <span className="text-2xl font-extrabold text-blue-600 tabular-nums">−${formatNumber(code.value)}</span>
+            <span className="text-2xl font-extrabold text-blue-600 tabular-nums">−{formatNumber(code.value)}$</span>
             <span className="text-xs text-gray-500">USD</span>
           </>
         )}
@@ -229,7 +229,7 @@ function PromoCard({ code, onToggle, onDelete }: { code: PromoDoc; onToggle: () 
         {code.minOrderTotal > 0 && (
           <div className="flex justify-between">
             <span>Min buyurtma:</span>
-            <span className="font-semibold text-gray-900 tabular-nums">${formatNumber(code.minOrderTotal)}</span>
+            <span className="font-semibold text-gray-900 tabular-nums">{formatNumber(code.minOrderTotal)}$</span>
           </div>
         )}
         <div className="flex justify-between">

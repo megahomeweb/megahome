@@ -366,7 +366,7 @@ export async function POST(req: NextRequest) {
           }
           const minOrder = Number(promoData.minOrderTotal) || 0;
           if (totalPrice < minOrder) {
-            const err = new Error(`Buyurtma kamida $${minOrder} boʻlishi kerak`);
+            const err = new Error(`Buyurtma kamida ${minOrder}$ boʻlishi kerak`);
             (err as Error & { promoError?: string }).promoError = 'min_order';
             throw err;
           }

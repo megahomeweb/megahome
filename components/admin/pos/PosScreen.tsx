@@ -1221,15 +1221,15 @@ function CartRow({
           </div>
           <div className="text-right shrink-0">
             <p className="text-[10px] uppercase tracking-wide text-gray-400">Narx</p>
-            <p className="text-sm text-gray-900 tabular-nums">${formatNumber(Number(product.price))}</p>
+            <p className="text-sm text-gray-900 tabular-nums">{formatNumber(Number(product.price))}$</p>
           </div>
           <div className="text-right shrink-0 min-w-[70px]">
             <p className="text-[10px] uppercase tracking-wide text-gray-400">Jami</p>
             <p className={`text-sm tabular-nums font-bold ${isInvalid ? "text-gray-400" : "text-gray-900"}`}>
-              {isInvalid ? "$0" : `$${formatNumber(netLine)}`}
+              {isInvalid ? "0$" : `${formatNumber(netLine)}$`}
             </p>
             {lineDiscAmt > 0 && (
-              <p className="text-[10px] text-amber-600 tabular-nums">−${formatNumber(lineDiscAmt)}</p>
+              <p className="text-[10px] text-amber-600 tabular-nums">−{formatNumber(lineDiscAmt)}$</p>
             )}
           </div>
         </div>
@@ -1770,9 +1770,9 @@ function printCartPreview(opts: {
       <tbody>${rows}</tbody>
     </table>
     <div class="totals">
-      <div class="row"><span>Oraliq summa:</span><span>$${fmt(opts.subtotal)}</span></div>
-      ${opts.discountAmount > 0 ? `<div class="row" style="color:#c2410c"><span>Chegirma:</span><span>−$${fmt(opts.discountAmount)}</span></div>` : ""}
-      <div class="row grand"><span>JAMI:</span><span>$${fmt(opts.total)}</span></div>
+      <div class="row"><span>Oraliq summa:</span><span>${fmt(opts.subtotal)}$</span></div>
+      ${opts.discountAmount > 0 ? `<div class="row" style="color:#c2410c"><span>Chegirma:</span><span>−${fmt(opts.discountAmount)}$</span></div>` : ""}
+      <div class="row grand"><span>JAMI:</span><span>${fmt(opts.total)}$</span></div>
     </div>
     <div class="footer">Rahmat! · MegaHome Ulgurji</div>
     <script>window.onload=function(){setTimeout(function(){window.print();},250);};</script>

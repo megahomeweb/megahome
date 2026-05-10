@@ -113,5 +113,5 @@ export async function handleProductDetail(chatId: number, productId: string): Pr
 }
 
 function formatPriceInline(price: string): string {
-  return '$' + Number(price).toLocaleString('en-US');
+  return Number(price).toLocaleString('en-US') + '$';
 }

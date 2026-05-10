@@ -147,7 +147,7 @@ export function requestContactKeyboard(): ReplyKeyboardMarkup {
 
 // ── Helpers ──
 function formatPriceShort(price: string): string {
-  return '$' + Number(price).toLocaleString('en-US');
+  return Number(price).toLocaleString('en-US') + '$';
 }
 
 function statusEmoji(status: string): string {
