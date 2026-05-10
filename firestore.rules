@@ -46,26 +46,27 @@ service cloud.firestore {
     //   customer could enumerate every other customer's phone/email (PII
     //   leak). Now restricted to OWNER or STAFF (admin/manager).
     // User profile updates: owners can update their OWN profile, but
-    // CANNOT change role / phone / email / uid. Without this lock, a
-    // signed-in customer could `updateDoc(myDoc, { role: 'admin' })` and
-    // then call /api/orders/create with `targetUserUid` to place orders
-    // attributed to other customers, or call /api/delete-user to wipe
-    // the user collection. Two server routes (orders/create:134,
-    // customers/create:54, delete-user) currently read role from this
-    // doc as the gate — locking the field down here removes the
-    // self-promotion vector without needing to ship every server fix
-    // simultaneously.
+    // CANNOT change role / email / uid. Without this lock, a signed-in
+    // customer could `updateDoc(myDoc, { role: 'admin' })` and then call
+    // /api/orders/create with `targetUserUid` to place orders attributed
+    // to other customers, or call /api/delete-user to wipe the user
+    // collection. The downstream server routes (orders/create:134,
+    // customers/create:54, delete-user) now also gate on the verified
+    // email claim, so we have defense in depth — this rule prevents the
+    // tampering, the routes ignore the doc role even if it WERE
+    // tampered.
     //
-    // Phone is also locked: nasiya entries and Telegram ref handling
-    // dedupe on phone, so a customer rewriting their own phone could
-    // hijack another customer's debt or referral chain.
+    // Phone is intentionally NOT locked here: /admin/profile lets staff
+    // (including non-admin managers) update their own phone, and
+    // customer profile flows allow self-correction. The narrow
+    // phone-dedupe-oracle risk is mitigated by customers/create being
+    // admin-only at the API layer.
     match /user/{userId} {
       allow read: if isOwner(userId) || isStaff();
       allow create: if isOwner(userId)
         || (isAdmin() && request.resource.data.role == 'user');
       allow update: if (isOwner(userId)
           && request.resource.data.role == resource.data.role
-          && request.resource.data.phone == resource.data.phone
           && request.resource.data.email == resource.data.email
           && request.resource.data.uid == resource.data.uid)
         || isAdmin();
