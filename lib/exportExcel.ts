@@ -13,9 +13,9 @@ export function exportOrdersToExcel(orders: Order[], filename = 'buyurtmalar') {
       'Sana': order.date?.seconds ? new Date(order.date.seconds * 1000).toLocaleString('uz-UZ') : '',
       'Holati': getStatusInfo(order.status).label,
       'Mahsulotlar soni': order.totalQuantity,
-      "Sotish narxi (so'm)": order.totalPrice,
-      "Tan narxi (so'm)": cost,
-      "Foyda (so'm)": profit,
+      'Sotish narxi (USD)': order.totalPrice,
+      'Tan narxi (USD)': cost,
+      'Foyda (USD)': profit,
     };
   });
 
@@ -32,11 +32,11 @@ export function exportOrdersToExcel(orders: Order[], filename = 'buyurtmalar') {
         '#': idx + 1,
         'Mahsulot': item.title,
         'Kategoriya': item.category,
-        "Narxi (so'm)": Number(item.price),
-        "Tan narxi (so'm)": item.costPrice || 0,
+        'Narxi (USD)': Number(item.price),
+        'Tan narxi (USD)': item.costPrice || 0,
         'Soni': item.quantity,
-        "Jami (so'm)": Number(item.price) * item.quantity,
-        "Foyda (so'm)": (Number(item.price) - (item.costPrice || 0)) * item.quantity,
+        'Jami (USD)': Number(item.price) * item.quantity,
+        'Foyda (USD)': (Number(item.price) - (item.costPrice || 0)) * item.quantity,
       });
     });
   });
@@ -57,9 +57,9 @@ export function exportProductsToExcel(products: ProductT[], filename = 'mahsulot
       'Nomi': p.title,
       'Kategoriya': p.category,
       'Subkategoriya': p.subcategory || '',
-      "Sotish narxi (so'm)": sellingPrice,
-      "Tan narxi (so'm)": costPrice,
-      "Foyda (so'm)": profit,
+      'Sotish narxi (USD)': sellingPrice,
+      'Tan narxi (USD)': costPrice,
+      'Foyda (USD)': profit,
       'Marja %': margin,
       'Ombor': p.stock ?? 1,
     };

@@ -72,7 +72,7 @@ export async function notifyDeliveryArriving(order: {
         '🚚 <b>Buyurtmangiz yo\'lda!</b>',
         '',
         `🆔 Buyurtma: <code>${order.id.slice(-8).toUpperCase()}</code>`,
-        `💰 Summa: ${Number(order.totalPrice).toLocaleString('uz-UZ').replace(/,/g, ' ')} UZS`,
+        `💰 Summa: $${Number(order.totalPrice).toLocaleString('en-US')}`,
         '',
         '📞 Kuryer tez orada siz bilan bog\'lanadi.',
       ].join('\n')

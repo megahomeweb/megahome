@@ -33,7 +33,7 @@ export function exportPriceList(products: ProductT[], categories: CategoryI[]) {
     '#': '',
     'Kategoriya': `MegaHome Ulgurji - Narx Ro'yxati`,
     'Mahsulot nomi': '',
-    "Narx (so'm)": '',
+    'Narx (USD)': '',
     'Omborda bor': dateStr,
   });
 
@@ -42,7 +42,7 @@ export function exportPriceList(products: ProductT[], categories: CategoryI[]) {
     '#': '',
     'Kategoriya': '',
     'Mahsulot nomi': '',
-    "Narx (so'm)": '',
+    'Narx (USD)': '',
     'Omborda bor': '',
   });
 
@@ -58,7 +58,7 @@ export function exportPriceList(products: ProductT[], categories: CategoryI[]) {
       '#': idx + 1,
       'Kategoriya': p.category,
       'Mahsulot nomi': p.title,
-      "Narx (so'm)": price,
+      'Narx (USD)': price,
       'Omborda bor': stockDisplay,
     });
   });
@@ -100,7 +100,7 @@ export function exportPriceList(products: ProductT[], categories: CategoryI[]) {
     return {
       'Kategoriya': catName,
       'Mahsulotlar soni': prices.length,
-      "Narx oralig'i (so'm)": rangeStr,
+      "Narx oralig'i (USD)": rangeStr,
     };
   });
 
@@ -121,10 +121,10 @@ export function exportPriceList(products: ProductT[], categories: CategoryI[]) {
   XLSX.writeFile(wb, `MegaHome_Narx_Royxati_${fileDate}.xlsx`);
 }
 
-/** Format a number with space grouping (e.g. 1 500 000) */
+/** Format a number with comma grouping (e.g. 1,500,000) */
 function formatNum(n: number): string {
-  return new Intl.NumberFormat('uz-UZ', {
+  return new Intl.NumberFormat('en-US', {
     useGrouping: true,
     maximumFractionDigits: 0,
-  }).format(n).replace(/,/g, ' ');
+  }).format(n);
 }

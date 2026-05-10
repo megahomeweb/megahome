@@ -14,7 +14,7 @@ export function escapeHtml(text: string): string {
 }
 
 function formatPrice(price: string | number): string {
-  return Number(price).toLocaleString('uz-UZ').replace(/,/g, ' ');
+  return '$' + Number(price).toLocaleString('en-US');
 }
 
 export function formatWelcome(userName: string): string {
@@ -64,7 +64,7 @@ export function formatProductCard(product: {
   const lines = [
     `📦 <b>${escapeHtml(product.title)}</b>`,
     '',
-    `💰 Narxi: <b>${formatPrice(product.price)} UZS</b>`,
+    `💰 Narxi: <b>${formatPrice(product.price)}</b>`,
   ];
 
   if (product.category) {
@@ -98,11 +98,11 @@ export function formatCartSummary(
   items.forEach((item, i) => {
     lines.push(
       `${i + 1}. ${escapeHtml(item.title)}`,
-      `   ${item.quantity} x ${formatPrice(item.price)} = <b>${formatPrice(item.price * item.quantity)} UZS</b>`
+      `   ${item.quantity} x ${formatPrice(item.price)} = <b>${formatPrice(item.price * item.quantity)}</b>`
     );
   });
 
-  lines.push('', `💰 <b>Jami: ${formatPrice(total)} UZS</b>`);
+  lines.push('', `💰 <b>Jami: ${formatPrice(total)}</b>`);
   return lines.join('\n');
 }
 
@@ -123,7 +123,7 @@ export function formatOrderNotification(order: {
     '',
     `🆔 Buyurtma: <code>${order.id.slice(-8).toUpperCase()}</code>`,
     `📦 Mahsulotlar: ${order.totalQuantity} ta`,
-    `💰 Jami: <b>${formatPrice(order.totalPrice)} UZS</b>`,
+    `💰 Jami: <b>${formatPrice(order.totalPrice)}</b>`,
     '',
     items,
     '',
@@ -141,7 +141,7 @@ export function formatStatusUpdate(
     '',
     `🆔 Buyurtma: <code>${order.id.slice(-8).toUpperCase()}</code>`,
     `📊 Holat: ${label}`,
-    `💰 Summa: ${formatPrice(order.totalPrice)} UZS`,
+    `💰 Summa: ${formatPrice(order.totalPrice)}`,
   ].join('\n');
 }
 
@@ -165,7 +165,7 @@ export function formatNewOrderAlert(order: {
     '',
     `👤 Mijoz: <b>${escapeHtml(order.clientName)}</b>`,
     `📞 Telefon: ${order.clientPhone}`,
-    `💰 Summa: <b>${formatPrice(order.totalPrice)} UZS</b>`,
+    `💰 Summa: <b>${formatPrice(order.totalPrice)}</b>`,
     `📦 Mahsulotlar: ${order.totalQuantity} ta`,
     '',
     items,
@@ -210,8 +210,8 @@ export function formatDailySummary(data: {
     `  ✅ Yetkazildi: ${data.deliveredOrders}`,
     `  ❌ Bekor: ${data.cancelledOrders}`,
     '',
-    `💰 Daromad: <b>${formatPrice(data.revenue)} UZS</b>`,
-    `📈 Foyda: <b>${formatPrice(data.profit)} UZS</b>`,
+    `💰 Daromad: <b>${formatPrice(data.revenue)}</b>`,
+    `📈 Foyda: <b>${formatPrice(data.profit)}</b>`,
     '',
     `⚠️ Kam qolgan: ${data.lowStockCount} ta mahsulot`,
     `👤 Yangi foydalanuvchilar: ${data.newUsers}`,
@@ -232,7 +232,7 @@ export function formatNewProductPost(product: {
     '🆕 <b>YANGI MAHSULOT!</b>',
     '',
     `📦 <b>${escapeHtml(product.title)}</b>`,
-    `💰 Narxi: <b>${formatPrice(product.price)} UZS</b>`,
+    `💰 Narxi: <b>${formatPrice(product.price)}</b>`,
     `📂 Kategoriya: ${escapeHtml(product.category)}`,
     product.description ? `\n${escapeHtml(product.description)}` : '',
     '',
@@ -250,8 +250,8 @@ export function formatPriceDropPost(product: {
     '🔥 <b>NARX TUSHDI!</b>',
     '',
     `📦 <b>${escapeHtml(product.title)}</b>`,
-    `💰 Eski narx: <s>${formatPrice(oldPrice)}</s> UZS`,
-    `🎯 Yangi narx: <b>${formatPrice(newPrice)} UZS</b>`,
+    `💰 Eski narx: <s>${formatPrice(oldPrice)}</s>`,
+    `🎯 Yangi narx: <b>${formatPrice(newPrice)}</b>`,
     `📉 Chegirma: <b>${percent}%</b>`,
     '',
     `🛒 Hoziroq buyurtma bering: ${siteUrl}/product/${product.id}`,
@@ -269,7 +269,7 @@ export function formatBackInStockPost(product: {
     '✅ <b>YANA MAVJUD!</b>',
     '',
     `📦 <b>${escapeHtml(product.title)}</b>`,
-    `💰 Narxi: <b>${formatPrice(product.price)} UZS</b>`,
+    `💰 Narxi: <b>${formatPrice(product.price)}</b>`,
     `📊 Stok: <b>${product.stock ?? 0} ta</b>`,
     '',
     `🛒 Buyurtma berish: ${siteUrl}/product/${product.id}`,

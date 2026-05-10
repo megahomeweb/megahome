@@ -219,8 +219,8 @@ function PromoCard({ code, onToggle, onDelete }: { code: PromoDoc; onToggle: () 
           <span className="text-3xl font-extrabold text-blue-600 tabular-nums">−{code.value}%</span>
         ) : (
           <>
-            <span className="text-2xl font-extrabold text-blue-600 tabular-nums">−{formatNumber(code.value)}</span>
-            <span className="text-xs text-gray-500">soʻm</span>
+            <span className="text-2xl font-extrabold text-blue-600 tabular-nums">−${formatNumber(code.value)}</span>
+            <span className="text-xs text-gray-500">USD</span>
           </>
         )}
       </div>
@@ -229,7 +229,7 @@ function PromoCard({ code, onToggle, onDelete }: { code: PromoDoc; onToggle: () 
         {code.minOrderTotal > 0 && (
           <div className="flex justify-between">
             <span>Min buyurtma:</span>
-            <span className="font-semibold text-gray-900 tabular-nums">{formatNumber(code.minOrderTotal)} soʻm</span>
+            <span className="font-semibold text-gray-900 tabular-nums">${formatNumber(code.minOrderTotal)}</span>
           </div>
         )}
         <div className="flex justify-between">
@@ -381,14 +381,14 @@ function CreateModal({
                   type === "abs" ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 bg-white text-gray-600"
                 }`}
               >
-                soʻm (UZS)
+                USD ($)
               </button>
             </div>
           </div>
 
           <div>
             <label className="text-xs font-bold text-gray-600 uppercase tracking-wide block mb-1">
-              Qiymat ({type === "pct" ? "%, 1-100" : "UZS"})
+              Qiymat ({type === "pct" ? "%, 1-100" : "USD"})
             </label>
             <input
               type="number"

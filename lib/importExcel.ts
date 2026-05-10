@@ -199,8 +199,8 @@ export function exportCustomersToExcel(customers: CustomerExportData[], filename
     'Ism': c.name,
     'Telefon': c.phone,
     'Buyurtmalar soni': c.totalOrders,
-    "Jami xarid (so'm)": c.totalSpent,
-    "Foyda (so'm)": c.totalProfit,
+    'Jami xarid (USD)': c.totalSpent,
+    'Foyda (USD)': c.totalProfit,
     'Oxirgi buyurtma': c.lastOrderDate
       ? new Date(c.lastOrderDate).toLocaleDateString('uz-UZ')
       : '—',

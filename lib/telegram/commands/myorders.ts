@@ -78,7 +78,7 @@ export async function handleOrderDetail(chatId: number, orderId: string): Promis
   const items = (data.basketItems || [])
     .slice(0, 15)
     .map((item: { title: string; quantity: number; price: string }, i: number) =>
-      `${i + 1}. ${escapeHtml(item.title)} — ${item.quantity} ta x ${formatPriceInline(item.price)} UZS`
+      `${i + 1}. ${escapeHtml(item.title)} — ${item.quantity} ta x ${formatPriceInline(item.price)}`
     )
     .join('\n');
 
@@ -93,7 +93,7 @@ export async function handleOrderDetail(chatId: number, orderId: string): Promis
     items,
     '',
     `📦 Jami: ${data.totalQuantity} ta`,
-    `💰 Summa: <b>${formatPriceInline(String(data.totalPrice))} UZS</b>`,
+    `💰 Summa: <b>${formatPriceInline(String(data.totalPrice))}</b>`,
     data.deliveryAddress ? `\n📍 Manzil: ${escapeHtml(data.deliveryAddress)}` : '',
     data.orderNote ? `📝 Izoh: ${escapeHtml(data.orderNote)}` : '',
   ].filter(Boolean).join('\n');
@@ -102,5 +102,5 @@ export async function handleOrderDetail(chatId: number, orderId: string): Promis
 }
 
 function formatPriceInline(price: string): string {
-  return Number(price).toLocaleString('uz-UZ').replace(/,/g, ' ');
+  return '$' + Number(price).toLocaleString('en-US');
 }

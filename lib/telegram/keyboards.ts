@@ -44,7 +44,7 @@ export function productListKeyboard(
   totalPages: number
 ): InlineKeyboardMarkup {
   const rows: InlineKeyboardButton[][] = products.map((p) => [
-    btn(`${p.title} — ${formatPriceShort(p.price)} UZS`, `product:${p.id}`),
+    btn(`${p.title} — ${formatPriceShort(p.price)}`, `product:${p.id}`),
   ]);
 
   // Pagination
@@ -121,7 +121,7 @@ export function confirmOrderKeyboard(): InlineKeyboardMarkup {
 // ── Order history ──
 export function orderHistoryKeyboard(orders: { id: string; date: string; totalPrice: number; status: string }[]): InlineKeyboardMarkup {
   const rows: InlineKeyboardButton[][] = orders.slice(0, 10).map((o) => [
-    btn(`${statusEmoji(o.status)} ${o.date} — ${formatPriceShort(String(o.totalPrice))} UZS`, `order_detail:${o.id}`),
+    btn(`${statusEmoji(o.status)} ${o.date} — ${formatPriceShort(String(o.totalPrice))}`, `order_detail:${o.id}`),
   ]);
   rows.push([btn('🔙 Bosh menyu', 'back:main')]);
   return inline(rows);
@@ -147,7 +147,7 @@ export function requestContactKeyboard(): ReplyKeyboardMarkup {
 
 // ── Helpers ──
 function formatPriceShort(price: string): string {
-  return Number(price).toLocaleString('uz-UZ').replace(/,/g, ' ');
+  return '$' + Number(price).toLocaleString('en-US');
 }
 
 function statusEmoji(status: string): string {

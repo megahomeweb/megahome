@@ -46,7 +46,7 @@ export const LABEL_TEMPLATES: LabelTemplate[] = [
 const escapeHtml = (s: string) =>
   s.replace(/[<>&"']/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&#39;" })[c] || c);
 
-const fmtUZS = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n)).replace(/,/g, " ") + " soʻm";
+const fmtUZS = (n: number) => "$" + new Intl.NumberFormat("en-US").format(Math.round(n));
 
 export function printLabels(items: LabelItem[], template: LabelTemplate, opts: { storeName?: string } = {}) {
   const storeName = opts.storeName || "MEGAHOME ULGURJI";

@@ -67,7 +67,7 @@ export async function handleCategoryProducts(chatId: number, categoryId: string,
     const stockText = p.stock > 0 ? `✅ ${p.stock} ta` : '🔴 Tugagan';
     const num = page * PRODUCTS_PER_PAGE + i + 1;
     lines.push(`${num}. <b>${escapeHtml(p.title)}</b>`);
-    lines.push(`   💰 ${formatPriceInline(p.price)} UZS | ${stockText}`);
+    lines.push(`   💰 ${formatPriceInline(p.price)}  | ${stockText}`);
   });
 
   await telegram.sendMessage(chatId, lines.join('\n'), {
@@ -113,5 +113,5 @@ export async function handleProductDetail(chatId: number, productId: string): Pr
 }
 
 function formatPriceInline(price: string): string {
-  return Number(price).toLocaleString('uz-UZ').replace(/,/g, ' ');
+  return '$' + Number(price).toLocaleString('en-US');
 }

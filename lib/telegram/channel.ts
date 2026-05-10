@@ -96,9 +96,9 @@ export async function postWeeklyBestsellers(products: {
 
     products.slice(0, 5).forEach((p, i) => {
       const medal = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'][i];
-      const price = Number(p.price).toLocaleString('uz-UZ').replace(/,/g, ' ');
+      const price = '$' + Number(p.price).toLocaleString('en-US');
       lines.push(`${medal} <b>${escapeHtml(p.title)}</b>`);
-      lines.push(`   💰 ${price} UZS | 📦 ${p.totalSold} ta sotildi`);
+      lines.push(`   💰 ${price} | 📦 ${p.totalSold} ta sotildi`);
       lines.push('');
     });
 
