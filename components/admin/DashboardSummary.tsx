@@ -1,14 +1,15 @@
 "use client";
-import { ShoppingCart, UserPlus, TrendingUp, TrendingDown, Package, AlertTriangle, DollarSign, HandCoins } from "lucide-react";
+import { ShoppingCart, UserPlus, TrendingUp, TrendingDown, Package, AlertTriangle, DollarSign, HandCoins, Info } from "lucide-react";
 import { useNotificationStore } from "@/store/useNotificationStore";
 import { formatUZS } from "@/lib/formatPrice";
-import { summarizeOrders } from "@/lib/orderMath";
+import { summarizeOrders, isCompletedSale } from "@/lib/orderMath";
 import Link from "next/link";
 import { ShineBorder } from "@/components/ui/shine-border";
 import useProductStore from "@/store/useProductStore";
 import { useOrderStore } from "@/store/useOrderStore";
 import { useEffect, useMemo } from "react";
 import { exportLowStockProducts } from "@/lib/exportExcel";
+import { useNasiyaTotal } from "@/hooks/useNasiyaTotal";
 import toast from "react-hot-toast";
 
 const DashboardSummary = () => {
@@ -47,7 +48,14 @@ const DashboardSummary = () => {
   const totalRevenue = totals.revenue;
   const totalCost = totals.cost;
   const totalProfit = totals.profit;
-  const outstandingNasiya = totals.outstandingNasiya;
+
+  // Outstanding nasiya — REAL balance from the /nasiya collection (server
+  // maintains `remaining` as customers pay), NOT the order-snapshot sum
+  // (which never decreases). The order-derived figure
+  // (`totals.outstandingNasiya`) is left intact for legacy callers but
+  // not surfaced on this card.
+  const nasiya = useNasiyaTotal();
+  const outstandingNasiya = nasiya.total;
 
   // Product stats
   const totalProducts = products.length;
@@ -59,8 +67,47 @@ const DashboardSummary = () => {
     [products]
   );
 
+  // Profit-bias warning: products that have been sold without a
+  // costPrice silently inflate profit (cost defaults to 0). Surface the
+  // count so the admin knows their margin is biased upward.
+  const missingCostPriceProducts = useMemo(() => {
+    const idsInSales = new Set<string>();
+    for (const o of orders) {
+      if (!isCompletedSale(o)) continue;
+      for (const item of o.basketItems || []) {
+        const cp = (item as { costPrice?: number }).costPrice;
+        if (!cp || cp <= 0) {
+          if (item.id) idsInSales.add(item.id);
+        }
+      }
+    }
+    return idsInSales.size;
+  }, [orders]);
+
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-3 gap-1.5 sm:gap-4 px-3 sm:px-0 mb-4 sm:mb-6">
+    <>
+      {/* Profit-bias warning banner — shown only when sold products lack a
+          costPrice. Without this, the dashboard's "Sof foyda" silently
+          treats those items as free-to-acquire, overstating profit. */}
+      {missingCostPriceProducts > 0 && (
+        <div className="mx-3 sm:mx-0 mb-3 sm:mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 sm:px-4 sm:py-3 flex items-start gap-2.5">
+          <Info className="size-4 sm:size-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs sm:text-sm font-semibold text-amber-900">
+              Foyda noto&apos;g&apos;ri ko&apos;rsatilishi mumkin
+            </p>
+            <p className="text-[11px] sm:text-xs text-amber-800 mt-0.5 leading-snug">
+              {missingCostPriceProducts} ta sotilgan mahsulotda tan narxi yo&apos;q.
+              Ularning foydasi haqiqatdan yuqori chiqyapti.{" "}
+              <Link href="/admin/products" className="underline font-semibold whitespace-nowrap">
+                Tan narxni kiriting →
+              </Link>
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-1.5 sm:gap-4 px-3 sm:px-0 mb-4 sm:mb-6">
       {/* New Orders */}
       <Link href="/admin/orders">
         <ShineBorder
@@ -203,11 +250,13 @@ const DashboardSummary = () => {
                 {totalProfit !== 0 ? formatUZS(totalProfit) : '0$'}
               </p>
               <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">
-                {totalRevenue > 0
+                {totalRevenue > 0 && totalProfit >= 0
                   ? `Marja: ${totals.margin.toFixed(1)}%`
-                  : totalCost > 0
-                    ? "Sotilgan-yo'q"
-                    : "Tan narxni kiriting"}
+                  : totalProfit < 0
+                    ? "Zarar — narxlarni tekshiring"
+                    : totalCost > 0
+                      ? "Sotilgan-yo'q"
+                      : "Tan narxni kiriting"}
               </p>
             </div>
             <div className={`flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl shrink-0 ${totalProfit > 0 ? "bg-amber-100" : totalProfit < 0 ? "bg-red-100" : "bg-gray-100"}`}>
@@ -217,32 +266,38 @@ const DashboardSummary = () => {
         </div>
       </ShineBorder>
 
-      {/* Qarzdorlik (Outstanding nasiya — money customers still owe) */}
-      {outstandingNasiya > 0 && (
-        <Link href="/admin/customers">
-          <ShineBorder
-            color={["#a855f7", "#9333ea", "#c084fc"]}
-            borderWidth={2}
-            duration={12}
-            className="hover:shadow-lg transition-shadow"
-          >
-            <div className="relative overflow-hidden w-full rounded-xl p-2 sm:p-4 min-w-0">
-              <div className="flex items-start justify-between gap-1 sm:gap-2">
-                <div className="min-w-0">
-                  <p className="text-[11px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Qarzdorlik</p>
-                  <p className="text-sm sm:text-2xl font-bold text-purple-600 mt-0.5 sm:mt-1 tabular-nums truncate">
-                    {formatUZS(outstandingNasiya)}
-                  </p>
-                  <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">Nasiya qoldiq</p>
-                </div>
-                <div className="flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl shrink-0 bg-purple-100">
-                  <HandCoins className="size-3.5 sm:size-5 text-purple-600" />
-                </div>
+      {/* Qarzdorlik (Outstanding nasiya — money customers still owe).
+          Always rendered, even at 0, so an admin can confirm "everyone
+          paid up" rather than wondering whether the card is just hidden. */}
+      <Link href="/admin/customers">
+        <ShineBorder
+          color={outstandingNasiya > 0 ? ["#a855f7", "#9333ea", "#c084fc"] : ["#e5e7eb"]}
+          borderWidth={outstandingNasiya > 0 ? 2 : 1}
+          duration={outstandingNasiya > 0 ? 12 : 25}
+          className="hover:shadow-lg transition-shadow"
+        >
+          <div className="relative overflow-hidden w-full rounded-xl p-2 sm:p-4 min-w-0">
+            <div className="flex items-start justify-between gap-1 sm:gap-2">
+              <div className="min-w-0">
+                <p className="text-[11px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Qarzdorlik</p>
+                <p className={`text-sm sm:text-2xl font-bold mt-0.5 sm:mt-1 tabular-nums truncate ${outstandingNasiya > 0 ? "text-purple-600" : "text-gray-400"}`}>
+                  {nasiya.loading ? '…' : (outstandingNasiya > 0 ? formatUZS(outstandingNasiya) : "Yo'q")}
+                </p>
+                <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">
+                  {outstandingNasiya > 0
+                    ? `${nasiya.count} ta nasiya`
+                    : nasiya.loading
+                      ? 'Hisoblanmoqda…'
+                      : "Hammasi to'langan"}
+                </p>
+              </div>
+              <div className={`flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl shrink-0 ${outstandingNasiya > 0 ? "bg-purple-100" : "bg-gray-100"}`}>
+                <HandCoins className={`size-3.5 sm:size-5 ${outstandingNasiya > 0 ? "text-purple-600" : "text-gray-400"}`} />
               </div>
             </div>
-          </ShineBorder>
-        </Link>
-      )}
+          </div>
+        </ShineBorder>
+      </Link>
 
       {/* Low Stock Alert */}
       <ShineBorder
@@ -283,7 +338,8 @@ const DashboardSummary = () => {
           </div>
         </Link>
       </ShineBorder>
-    </div>
+      </div>
+    </>
   );
 };
 

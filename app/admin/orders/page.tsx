@@ -15,6 +15,7 @@ import { formatUZS } from '@/lib/formatPrice';
 import { orderRevenue, orderCost } from '@/lib/orderMath';
 import { formatDateTimeShort } from "@/lib/formatDate";
 import { matchesSearch } from '@/lib/searchMatch';
+import { formatUzPhone, canonicalPhone } from '@/lib/phone';
 import { ORDER_STATUSES, getStatusInfo } from '@/lib/orderStatus';
 import { OrderStatus } from '@/lib/types';
 import toast from 'react-hot-toast';
@@ -85,14 +86,23 @@ const Orders = () => {
   // order in the system. Now both the list and the export consume this.
   const filteredOrders = useMemo(() => {
     let list = orders;
-    // Search
+    // Search — matches name, phone, or order id. Phone match canonicalizes
+    // both sides so a query of "901234567" finds an order saved as
+    // "+998 (90) 123-45-67" and vice versa. Without this, the operator's
+    // search hit only when their input format exactly matched what was
+    // stored, which is brittle since phones come from many entry points.
     if (search.trim()) {
       const q = search.toLowerCase();
-      list = list.filter(o =>
-        (o.clientName ? matchesSearch(o.clientName, search) : false) ||
-        (o.clientPhone ? o.clientPhone.includes(search) : false) ||
-        (o.id ? o.id.toLowerCase().includes(q) : false)
-      );
+      const qPhoneCanon = canonicalPhone(search);
+      list = list.filter(o => {
+        if (o.clientName && matchesSearch(o.clientName, search)) return true;
+        if (o.id && o.id.toLowerCase().includes(q)) return true;
+        if (o.clientPhone) {
+          if (qPhoneCanon && canonicalPhone(o.clientPhone).includes(qPhoneCanon)) return true;
+          if (o.clientPhone.includes(search)) return true;
+        }
+        return false;
+      });
     }
     // Status filter (multi-select)
     if (statusFilter.size > 0) {
@@ -373,7 +383,7 @@ const Orders = () => {
                       <div className="flex items-center justify-between gap-2 min-w-0 sm:flex-none">
                         <div className="min-w-0 flex-1 sm:flex-none">
                           <h3 className="text-sm sm:text-base font-bold capitalize truncate">{order.clientName}</h3>
-                          <p className="text-xs sm:text-sm text-gray-500 truncate">{order.clientPhone}</p>
+                          <p className="text-xs sm:text-sm text-gray-500 truncate">{formatUzPhone(order.clientPhone)}</p>
                         </div>
                         {/* Price pinned to right on mobile so it always reads at a glance */}
                         <span className="sm:hidden text-sm font-bold text-green-600 tabular-nums shrink-0">{formatUZS(order.totalPrice)}</span>

@@ -28,11 +28,6 @@ const UsersPage = () => {
     return { total, admins, managers, regularUsers, newToday };
   }, [users, notifications]);
 
-  const filteredSearch = useMemo(() => {
-    if (roleFilter === 'all') return search;
-    return search;
-  }, [search, roleFilter]);
-
   return (
     <div>
       <PanelTitle title="Foydalanuvchilar" />
@@ -99,7 +94,7 @@ const UsersPage = () => {
       </div>
 
       <Search search={search} handleSearchChange={setSearch} placeholder="Ism yoki email bo'yicha qidirish" />
-      <UsersTable search={filteredSearch} roleFilter={roleFilter} />
+      <UsersTable search={search} roleFilter={roleFilter} />
     </div>
   );
 };

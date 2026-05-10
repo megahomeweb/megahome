@@ -19,7 +19,25 @@ const AdminProfilePage = () => {
   });
   const [phoneNumber, setPhoneNumber] = useState('');
   const [phoneError, setPhoneError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  /**
+   * Password policy: minimum 8 characters, must contain at least one
+   * letter and one digit. Returns a localized error message or null if
+   * the password is acceptable.
+   *
+   * Why client-side: Firebase Auth itself enforces ≥6 chars only, which
+   * for an admin account is unacceptably weak. Defense in depth — server
+   * still hashes whatever Firebase accepts, but we refuse to send a
+   * weak password to Firebase in the first place.
+   */
+  const validateNewPassword = (pwd: string): string | null => {
+    if (pwd.length < 8) return 'Yangi parol kamida 8 ta belgidan iborat bo\'lsin';
+    if (!/[A-Za-z]/.test(pwd)) return 'Yangi parolda kamida bitta harf bo\'lsin';
+    if (!/\d/.test(pwd)) return 'Yangi parolda kamida bitta raqam bo\'lsin';
+    return null;
+  };
 
   useEffect(() => {
     if (userData) {
@@ -60,12 +78,29 @@ const AdminProfilePage = () => {
     e.preventDefault();
     setLoading(true);
     setPhoneError("");
+    setPasswordError("");
     // Phone validation: must be 9 digits after +998
     const digits = phoneNumber.replace(/\D/g, "");
     if (digits.length !== 12) {
       setPhoneError('Telefon raqami to\'liq emas.');
       setLoading(false);
       return;
+    }
+    // Validate password policy BEFORE we burn a Firebase reauth call.
+    // Firebase reauth has rate limits — repeatedly submitting a too-weak
+    // password could lock the admin out of the account.
+    if (form.oldPassword && form.newPassword) {
+      const pwdProblem = validateNewPassword(form.newPassword);
+      if (pwdProblem) {
+        setPasswordError(pwdProblem);
+        setLoading(false);
+        return;
+      }
+      if (form.newPassword === form.oldPassword) {
+        setPasswordError('Yangi parol eskisidan farq qilsin');
+        setLoading(false);
+        return;
+      }
     }
     try {
       if (!userData || !userData.email) {
@@ -164,8 +199,15 @@ const AdminProfilePage = () => {
             value={form.newPassword}
             onChange={handleChange}
             placeholder="Yangi parolni kiriting"
-            className="flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-xl text-brand-black-text focus:outline-0 focus:ring-0 border-none bg-[#e7edf3] focus:border-none !h-10 placeholder:text-[#4e7397] p-4 text-base font-normal leading-normal"
+            autoComplete="new-password"
+            className={`flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-xl text-brand-black-text focus:outline-0 focus:ring-0 border-none bg-[#e7edf3] focus:border-none !h-10 placeholder:text-[#4e7397] p-4 text-base font-normal leading-normal ${passwordError ? 'border-red-500 border-2' : ''}`}
           />
+          <p className="text-[11px] text-gray-500 mt-1">
+            Kamida 8 ta belgi · 1 ta harf · 1 ta raqam
+          </p>
+          {passwordError && (
+            <span className="text-red-500 text-sm mt-1 block">{passwordError}</span>
+          )}
         </div>
         <Button type="submit" disabled={loading}>
           {loading ? 'Saqlanmoqda...' : 'Saqlash'}

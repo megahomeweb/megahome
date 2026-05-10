@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Command } from "cmdk";
 import { useRouter } from "next/navigation";
 import useProductStore from "@/store/useProductStore";
@@ -16,17 +16,48 @@ export default function CommandPalette() {
   const router = useRouter();
   const { products } = useProductStore();
   const { orders } = useOrderStore();
+  // Remember the focused element when the palette opens so we can
+  // restore it on close — without this, closing the palette via ESC or
+  // backdrop-click leaves focus on <body>, which is a screen-reader
+  // dead zone and breaks keyboard nav for sighted users too.
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
+      // Toggle on Cmd/Ctrl+K from anywhere, including inside form inputs.
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         setOpen((o) => !o);
+        return;
+      }
+      // ESC must close the palette globally even when focus has moved
+      // outside the cmdk Input — cmdk's own onKeyDown only fires on its
+      // internal input element. Without this handler the user can be
+      // stuck inside the overlay if they tab to a Command.Item then
+      // press ESC.
+      if (e.key === "Escape" && open) {
+        e.preventDefault();
+        setOpen(false);
       }
     };
     document.addEventListener("keydown", down);
     return () => document.removeEventListener("keydown", down);
-  }, []);
+  }, [open]);
+
+  // Capture caller's focus on open; restore it on close.
+  useEffect(() => {
+    if (open) {
+      restoreFocusRef.current = (document.activeElement as HTMLElement | null) ?? null;
+    } else if (restoreFocusRef.current) {
+      const el = restoreFocusRef.current;
+      restoreFocusRef.current = null;
+      // requestAnimationFrame so the DOM has unmounted the overlay
+      // before we move focus, otherwise the focus jump can be lost.
+      requestAnimationFrame(() => {
+        try { el.focus(); } catch {}
+      });
+    }
+  }, [open]);
 
   const runCommand = (fn: () => void) => {
     setOpen(false);
@@ -36,7 +67,7 @@ export default function CommandPalette() {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[100]">
+    <div className="fixed inset-0 z-[100]" role="dialog" aria-modal="true" aria-label="Qidirish">
       <div className="fixed inset-0 bg-black/50" onClick={() => setOpen(false)} />
       <div className="fixed top-[20%] left-1/2 -translate-x-1/2 w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden z-[101]">
         <Command label="Qidirish">

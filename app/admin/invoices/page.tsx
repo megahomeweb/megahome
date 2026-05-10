@@ -6,6 +6,7 @@ import { useOrderStore } from '@/store/useOrderStore';
 import { formatUZS } from '@/lib/formatPrice';
 import { formatDateTimeShort } from "@/lib/formatDate";
 import { getStatusInfo } from '@/lib/orderStatus';
+import { orderRevenue } from '@/lib/orderMath';
 import { FileText, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -43,7 +44,11 @@ const InvoicesPage = () => {
       return true;
     });
     result.sort((a, b) => {
-      if (sortBy === 'amount') return (b.totalPrice || 0) - (a.totalPrice || 0);
+      // "Summa" sort uses NET revenue (after promo + ticket discount) so
+      // the same order ranks identically here and on /admin/customers
+      // (which uses orderRevenue). Previously `totalPrice` (gross) put
+      // big-discount orders at the top of the list.
+      if (sortBy === 'amount') return orderRevenue(b) - orderRevenue(a);
       return (b.date?.seconds || 0) - (a.date?.seconds || 0);
     });
     return result;
@@ -155,7 +160,7 @@ const InvoicesPage = () => {
                         <p className="text-xs text-gray-500">{date}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-sm font-bold text-gray-900 tabular-nums">{formatUZS(order.totalPrice)}</p>
+                        <p className="text-sm font-bold text-gray-900 tabular-nums">{formatUZS(orderRevenue(order))}</p>
                         <p className="text-[11px] sm:text-xs text-gray-500">{order.totalQuantity} ta</p>
                       </div>
                       <span

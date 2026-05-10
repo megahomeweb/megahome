@@ -9,6 +9,7 @@ import type { UserData } from '@/store/authStore';
 import { formatUZS } from '@/lib/formatPrice';
 import { isCompletedSale, orderRevenue, orderCost } from '@/lib/orderMath';
 import { matchesSearch } from '@/lib/searchMatch';
+import { canonicalPhone, formatUzPhone } from '@/lib/phone';
 import { Crown, TrendingUp, ShoppingCart, Phone, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { exportCustomersToExcel } from '@/lib/importExcel';
@@ -36,22 +37,60 @@ const CustomersPage = () => {
       lastOrderDate: number;
     }> = {};
 
+    // Build a uid → user lookup AND a canonical-phone → user lookup so
+    // that a pre-signup order placed with phone X and a post-signup
+    // order placed with uid Y (same person, same phone) collapse to a
+    // single ranking row instead of double-counting.
+    const userByUid = new Map<string, UserData>();
+    const userByPhone = new Map<string, UserData>();
+    for (const u of users) {
+      if (u.uid) userByUid.set(u.uid, u);
+      const ph = canonicalPhone(u.phone);
+      if (ph && !userByPhone.has(ph)) userByPhone.set(ph, u);
+    }
+
     for (const order of orders) {
-      const key = order.userUid || order.clientPhone;
-      if (!statsMap[key]) {
-        const user = users.find((u: UserData) => u.uid === order.userUid) || null;
-        statsMap[key] = {
-          user,
-          name: user?.name || order.clientName,
-          phone: user?.phone || order.clientPhone,
+      // Resolve the order to a customer using the strongest signal
+      // available, in priority order:
+      //   1. userUid → look up in the user collection
+      //   2. canonical(clientPhone) → look up the same way
+      //   3. fall back to canonical phone alone (no user doc yet)
+      //   4. fall back to the raw phone (unparseable / international)
+      //   5. last resort: lowercased clientName
+      // The KEY is the dedupe identity. Two orders that resolve to the
+      // same key share a stats row.
+      const phoneKey = canonicalPhone(order.clientPhone);
+      const matchedUser =
+        (order.userUid && userByUid.get(order.userUid)) ||
+        (phoneKey && userByPhone.get(phoneKey)) ||
+        null;
+      const dedupeKey =
+        matchedUser?.uid ||
+        phoneKey ||
+        (order.clientPhone || '').trim() ||
+        (order.clientName || '').trim().toLowerCase() ||
+        order.id;
+
+      if (!statsMap[dedupeKey]) {
+        statsMap[dedupeKey] = {
+          user: matchedUser,
+          name: matchedUser?.name || order.clientName || 'Mijoz',
+          phone: formatUzPhone(matchedUser?.phone || order.clientPhone),
           totalOrders: 0,
           deliveredOrders: 0,
           totalSpent: 0,
           totalProfit: 0,
           lastOrderDate: 0,
         };
+      } else if (!statsMap[dedupeKey].user && matchedUser) {
+        // We saw an anonymous order first, then matched the same person
+        // via uid on a later order — promote the row to the linked user
+        // so name/phone reflect the canonical profile.
+        statsMap[dedupeKey].user = matchedUser;
+        if (matchedUser.name) statsMap[dedupeKey].name = matchedUser.name;
+        if (matchedUser.phone) statsMap[dedupeKey].phone = formatUzPhone(matchedUser.phone);
       }
-      const s = statsMap[key];
+      const s = statsMap[dedupeKey];
       s.totalOrders++;
       const orderDate = order.date?.seconds ? order.date.seconds * 1000 : 0;
       if (orderDate > s.lastOrderDate) s.lastOrderDate = orderDate;

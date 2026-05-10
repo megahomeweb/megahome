@@ -46,7 +46,20 @@ export const LABEL_TEMPLATES: LabelTemplate[] = [
 const escapeHtml = (s: string) =>
   s.replace(/[<>&"']/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&#39;" })[c] || c);
 
-const fmtUZS = (n: number) => new Intl.NumberFormat("en-US").format(Math.round(n)) + "$";
+/**
+ * Label-specific currency formatter — these are PHYSICAL price stickers a
+ * customer reads in the store, so they must say "so'm" (the local
+ * currency), not the "$" suffix the admin UI uses elsewhere as a stylistic
+ * choice. Use a thin space (U+202F) as the thousands separator so prices
+ * read clean even at small font sizes ("1 500 000 so'm" vs "1,500,000$").
+ */
+const fmtUZS = (n: number) => {
+  const grouped = new Intl.NumberFormat("ru-RU", {
+    useGrouping: true,
+    maximumFractionDigits: 0,
+  }).format(Math.round(n));
+  return `${grouped} so'm`;
+};
 
 export function printLabels(items: LabelItem[], template: LabelTemplate, opts: { storeName?: string } = {}) {
   const storeName = opts.storeName || "MEGAHOME ULGURJI";

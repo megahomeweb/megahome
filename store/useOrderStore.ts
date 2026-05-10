@@ -1,7 +1,21 @@
 import { create } from "zustand";
-import { collection, query, onSnapshot, doc, increment, Timestamp, where, addDoc, runTransaction, orderBy, deleteDoc, getDocs } from "firebase/firestore";
+import { collection, query, onSnapshot, doc, increment, Timestamp, where, addDoc, runTransaction, orderBy, deleteDoc, getDocs, limit as fbLimit } from "firebase/firestore";
 import { fireDB, auth } from '@/firebase/config';
 import { Order, OrderStatus, ProductT } from "@/lib/types";
+
+/**
+ * Default cap on the admin-side orders subscription. Without a cap, the
+ * dashboard listener loads the entire `orders` collection — fine at
+ * launch but linear in cost and memory once a long-running shop has
+ * tens of thousands of historical orders. The cap is generous enough
+ * to cover months of data for typical wholesale volume (5–50/day) while
+ * bounding the worst case.
+ *
+ * If the operator legitimately needs deeper history (e.g. yearly P&L
+ * report), expose a "load more" or a date-range query rather than
+ * raising this cap globally.
+ */
+const ORDERS_LIST_DEFAULT_CAP = 2000;
 
 /**
  * Stock model:
@@ -377,12 +391,29 @@ export const useOrderStore = create<StoreState>((set, get) => ({
     if (get()._unsubOrders) return;
     set({ loadingOrders: true });
     try {
-      const q = query(collection(fireDB, "orders"));
+      // Server-ordered by date desc + capped — see ORDERS_LIST_DEFAULT_CAP
+      // for rationale. Previously the listener pulled every order in
+      // arbitrary Firestore document order, which made the dashboard
+      // increasingly expensive as the catalog grew and broke any
+      // assumption that `orders[0]` was the newest entry.
+      const q = query(
+        collection(fireDB, "orders"),
+        orderBy("date", "desc"),
+        fbLimit(ORDERS_LIST_DEFAULT_CAP),
+      );
       const unsubscribe = onSnapshot(q, (QuerySnapshot) => {
         const OrderArray: Order[] = [];
         QuerySnapshot.forEach((d) => {
           OrderArray.push({ ...d.data(), id: d.id } as Order);
         });
+        if (QuerySnapshot.size === ORDERS_LIST_DEFAULT_CAP) {
+          // Heads-up so an operator on a high-volume shop notices that
+          // dashboards are bounded and can request a wider query.
+          console.warn(
+            `[useOrderStore] orders cap hit (${ORDERS_LIST_DEFAULT_CAP}) — ` +
+            `older orders are not loaded. Add date-range filters for full history.`,
+          );
+        }
         set({ orders: OrderArray, loadingOrders: false });
       });
       set({ _unsubOrders: unsubscribe });

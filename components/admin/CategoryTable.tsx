@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Button } from '../ui/button';
 import { BiEdit, BiTrash } from 'react-icons/bi';
 import Image from 'next/image';
 import useCategoryStore from '@/store/useCategoryStore';
+import useProductStore from '@/store/useProductStore';
 import { useRouter } from 'next/navigation';
 import { CategoryI } from '@/lib/types';
 import { matchesSearch } from '@/lib/searchMatch';
@@ -16,12 +17,28 @@ interface CategoryTableProps {
 
 const CategoryTable = ({ search }: CategoryTableProps) => {
   const { categories, fetchCategories, deleteCategory } = useCategoryStore();
+  const { products, fetchProducts } = useProductStore();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const navigate = useRouter()
 
   useEffect(() => {
     fetchCategories();
-  }, [fetchCategories]);
+    fetchProducts();
+  }, [fetchCategories, fetchProducts]);
+
+  // Per-category product counts so we can refuse to delete a category
+  // that's still in use. Without this, deleting a category orphans every
+  // product in it (they keep a stale `category: 'whatever'` field that
+  // no longer matches anything in the dropdown — silent data corruption).
+  const productCountByCategory = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of products) {
+      if (!p.category) continue;
+      m.set(p.category, (m.get(p.category) || 0) + 1);
+    }
+    return m;
+  }, [products]);
 
   // Search filter logic
   const filteredCategories = useMemo(() => {
@@ -37,19 +54,47 @@ const CategoryTable = ({ search }: CategoryTableProps) => {
   }
 
   const handleDelete = async (item: CategoryI) => {
-    if (item.id) {
-      const imageFolderRef = ref(
-        fireStorage,
-        `categories/${item.storageFileId}`
+    if (!item.id) return;
+    // Refuse to delete a category that has products in it. Two-step
+    // safety: this matches the backend invariant (products carry a
+    // `category` string field that points to a category name; deleting
+    // the category orphans every product whose `category` matched). We
+    // tell the operator how many would be orphaned so they can decide
+    // what to do.
+    const inUse = productCountByCategory.get(item.name) || 0;
+    if (inUse > 0) {
+      toast.error(
+        `${inUse} ta mahsulot bu kategoriyada. Avval ularni boshqa kategoriyaga ko'chiring.`,
+        { duration: 4500 },
       );
-      const imageRefs = await listAll(imageFolderRef);
+      return;
+    }
+    // Confirm before destroying images + Firestore doc. Without this,
+    // a misclick on the trash icon nukes a category instantly.
+    const ok = typeof window !== 'undefined'
+      ? window.confirm(`"${item.name}" kategoriyasini o'chirmoqchimisiz? Rasm va sozlamalar yo'qoladi.`)
+      : true;
+    if (!ok) return;
 
-      const deleteImagePromises = imageRefs.items.map(async (itemRef) => {
-        await deleteObject(itemRef);
-      });
-      await Promise.all(deleteImagePromises);
-      deleteCategory(item.id);
-      toast.success("Kategoriya muvaffaqiyatli o‘chirildi");
+    setDeletingId(item.id);
+    try {
+      // Storage cleanup is best-effort — if the folder no longer exists
+      // (e.g. category was created without uploading an image), `listAll`
+      // returns empty and we proceed straight to the Firestore delete.
+      try {
+        const imageFolderRef = ref(fireStorage, `categories/${item.storageFileId}`);
+        const imageRefs = await listAll(imageFolderRef);
+        await Promise.all(imageRefs.items.map((itemRef) => deleteObject(itemRef)));
+      } catch (storageErr) {
+        console.warn('Category image cleanup failed (continuing):', storageErr);
+      }
+      await deleteCategory(item.id);
+      toast.success("Kategoriya muvaffaqiyatli o'chirildi");
+    } catch (e) {
+      console.error('Category delete failed:', e);
+      toast.error("Kategoriyani o'chirishda xatolik");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -112,7 +157,18 @@ const CategoryTable = ({ search }: CategoryTableProps) => {
                   </Button>
                 </td>
                 <td className="w-20 h-20 px-4 py-2 text-sm font-normal">
-                  <Button onClick={() => handleDelete(category)} className="flex items-center justify-center mx-auto cursor-pointer" variant={'default'}>
+                  <Button
+                    onClick={() => handleDelete(category)}
+                    disabled={deletingId === category.id}
+                    aria-label={`${category.name} kategoriyasini o'chirish`}
+                    title={
+                      (productCountByCategory.get(category.name) || 0) > 0
+                        ? `${productCountByCategory.get(category.name)} ta mahsulot mavjud — o'chirib bo'lmaydi`
+                        : 'O\'chirish'
+                    }
+                    className="flex items-center justify-center mx-auto cursor-pointer disabled:opacity-50"
+                    variant={'default'}
+                  >
                     <BiTrash size={24} />
                   </Button>
                 </td>
@@ -162,10 +218,11 @@ const CategoryTable = ({ search }: CategoryTableProps) => {
                 </Button>
                 <Button
                   onClick={() => handleDelete(category)}
+                  disabled={deletingId === category.id}
                   variant={'ghost'}
                   size="icon"
-                  className="size-8 cursor-pointer text-red-500 hover:text-red-700"
-                  aria-label="O'chirish"
+                  className="size-8 cursor-pointer text-red-500 hover:text-red-700 disabled:opacity-50"
+                  aria-label={`${category.name} kategoriyasini o'chirish`}
                 >
                   <BiTrash size={18} />
                 </Button>

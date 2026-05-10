@@ -232,3 +232,21 @@
   mask: linear-gradient(90deg, transparent 0%, black 8%, black 92%, transparent 100%);
   -webkit-mask: linear-gradient(90deg, transparent 0%, black 8%, black 92%, transparent 100%);
 }
+
+/* Reduced motion — honour OS-level preference. Sliding sidebars,
+   pulsing badges, and infinite scroll-left animations are all motion
+   triggers for vestibular-disorder users. We don't kill all transitions
+   (instant state changes can be jarring too); we cap them at a level
+   well below the WCAG 2.3.1 threshold. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-scroll-left,
+  .shine-border-effect {
+    animation: none !important;
+  }
+}

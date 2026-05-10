@@ -142,8 +142,17 @@ const NotificationPanel = () => {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-12 w-[calc(100vw-1rem)] sm:w-[400px] md:w-[460px] max-w-[calc(100vw-1rem)] max-h-[min(600px,calc(100dvh-6rem))] bg-white rounded-xl shadow-2xl border border-gray-200 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
+        // Panel uses flex-column with the header pinned at top and the
+        // list region taking the remaining space and scrolling
+        // independently. Previously the list section had a fixed
+        // max-h:460px while the panel itself was capped at min(600px,
+        // 100dvh-6rem) — on tall phones the inner scroll was shorter
+        // than the panel's available room AND on short phones the
+        // header would push the list off-screen. Flex column with
+        // min-h:0 + flex-1 lets the list always fill the visible area
+        // and scroll inside it.
+        <div className="absolute right-0 top-12 w-[calc(100vw-1rem)] sm:w-[400px] md:w-[460px] max-w-[calc(100vw-1rem)] max-h-[min(600px,calc(100dvh-6rem))] bg-white rounded-xl shadow-2xl border border-gray-200 z-50 overflow-hidden flex flex-col animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50 shrink-0">
             <h3 className="font-bold text-base text-gray-900">
               Bildirishnomalar
               {unreadCount > 0 && (
@@ -163,7 +172,7 @@ const NotificationPanel = () => {
             )}
           </div>
 
-          <div className="overflow-y-auto max-h-[460px]">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
             {notifications.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-gray-400">
                 <Bell className="size-10 mb-3 opacity-30" />

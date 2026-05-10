@@ -5,6 +5,10 @@ import { Button } from '@/components/ui/button';
 import { collection, onSnapshot, query, doc, deleteDoc } from 'firebase/firestore';
 import { fireDB, auth } from '@/firebase/config';
 import { formatDateTimeShort } from '@/lib/formatDate';
+import { useOrderStore } from '@/store/useOrderStore';
+import useProductStore from '@/store/useProductStore';
+import { useAuthStore } from '@/store/authStore';
+import { isCompletedSale, orderRevenue, orderCost } from '@/lib/orderMath';
 import toast from 'react-hot-toast';
 import {
   Send, Bot, Users, Bell, BellOff, Trash2, RefreshCw,
@@ -35,6 +39,20 @@ const TelegramPage = () => {
   const [sending, setSending] = useState(false);
   const [testSending, setTestSending] = useState(false);
   const [webhookStatus, setWebhookStatus] = useState<'unknown' | 'active' | 'inactive'>('unknown');
+
+  // Live data sources for the test message — previously this used
+  // hardcoded "5 orders, 15M revenue, etc." which made the test useless
+  // (admin couldn't verify the formatting against real numbers, and
+  // sending fake data to a live channel is misleading if anyone reads it).
+  const { orders, fetchAllOrders } = useOrderStore();
+  const { products, fetchProducts } = useProductStore();
+  const { users, fetchAllUsers } = useAuthStore();
+  useEffect(() => { fetchAllOrders(); }, [fetchAllOrders]);
+  useEffect(() => { fetchProducts(); }, [fetchProducts]);
+  useEffect(() => {
+    const unsub = fetchAllUsers() as (() => void) | undefined;
+    return () => { if (typeof unsub === 'function') unsub(); };
+  }, [fetchAllUsers]);
 
   // Fetch telegram users
   useEffect(() => {
@@ -83,6 +101,44 @@ const TelegramPage = () => {
         toast.error('Avval tizimga kiring');
         return;
       }
+
+      // Compute today's actual figures so the "test" message reflects
+      // the same data the real daily summary would. Sending fabricated
+      // numbers to admins trains them to mistrust real summaries.
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const startMs = startOfDay.getTime();
+
+      const todayOrders = orders.filter((o) => {
+        const ts = o.date?.seconds ? o.date.seconds * 1000 : 0;
+        return ts >= startMs;
+      });
+
+      let revenue = 0;
+      let cost = 0;
+      let delivered = 0;
+      let cancelled = 0;
+      let newOrders = 0;
+      for (const o of todayOrders) {
+        if (o.status === 'bekor_qilindi') { cancelled++; continue; }
+        if (o.status === 'yetkazildi') delivered++;
+        if (o.status === 'yangi' || !o.status) newOrders++;
+        if (isCompletedSale(o)) {
+          revenue += orderRevenue(o);
+          cost += orderCost(o);
+        }
+      }
+      const profit = revenue - cost;
+      const lowStockCount = products.filter(
+        (p) => typeof p.stock === 'number' && (p.stock as number) <= 5,
+      ).length;
+      const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      const newUsers = users.filter((u) => {
+        const t = (u as { time?: { seconds?: number } }).time;
+        const ts = t?.seconds ? t.seconds * 1000 : 0;
+        return ts >= oneDayAgo;
+      }).length;
+
       const res = await fetch('/api/telegram/notify', {
         method: 'POST',
         headers: {
@@ -92,19 +148,19 @@ const TelegramPage = () => {
         body: JSON.stringify({
           type: 'daily_summary',
           data: {
-            totalOrders: 5,
-            newOrders: 3,
-            deliveredOrders: 2,
-            cancelledOrders: 0,
-            revenue: 15000000,
-            profit: 3500000,
-            lowStockCount: 4,
-            newUsers: 1,
+            totalOrders: todayOrders.length,
+            newOrders,
+            deliveredOrders: delivered,
+            cancelledOrders: cancelled,
+            revenue,
+            profit,
+            lowStockCount,
+            newUsers,
             date: new Date().toISOString().split('T')[0],
           },
         }),
       });
-      if (res.ok) toast.success('Test xabar yuborildi!');
+      if (res.ok) toast.success('Test xabar yuborildi (haqiqiy bugungi raqamlar bilan)');
       else toast.error('Xabar yuborilmadi');
     } catch {
       toast.error('Xatolik yuz berdi');

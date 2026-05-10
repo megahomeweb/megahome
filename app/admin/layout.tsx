@@ -5,12 +5,14 @@ import DailySummaryGenerator from '@/components/admin/DailySummaryGenerator'
 import CommandPalette from '@/components/admin/CommandPalette'
 import SwipeableAdminContent from '@/components/admin/SwipeableAdminContent'
 import OfflineBanner from '@/components/admin/OfflineBanner'
+import AdminListenersBoundary from '@/components/admin/AdminListenersBoundary'
 import ProtectedRoute from '@/components/auth/ProtectedRoute'
 import { ReactNode } from 'react'
 
 const AdminLayout = ({ children }: { children: ReactNode }) => {
   return (
     <ProtectedRoute requireAuth={true} adminOnly={true}>
+      <AdminListenersBoundary />
       <CommandPalette />
       <div className="flex min-h-screen bg-gray-100 print:bg-white print:min-h-0 overflow-x-clip">
         {/* Sidebar — desktop only */}

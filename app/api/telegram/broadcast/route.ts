@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminApp } from '@/lib/firebase-admin';
+import { isAdminEmail } from '@/lib/admin-config';
 import { telegram } from '@/lib/telegram/bot';
 
 /**
@@ -26,14 +27,15 @@ export async function POST(req: NextRequest) {
     }
 
     const adminApp = getAdminApp();
-    let callerUid: string;
+    let callerEmail: string | null = null;
     try {
-      callerUid = (await adminApp.auth().verifyIdToken(authHeader.split('Bearer ')[1])).uid;
+      const decoded = await adminApp.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+      callerEmail = decoded.email ?? null;
     } catch {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
-    const callerDoc = await adminApp.firestore().collection('user').doc(callerUid).get();
-    if (!callerDoc.exists || callerDoc.data()?.role !== 'admin') {
+    // Email-claim gate, consistent with all other admin-only routes.
+    if (!isAdminEmail(callerEmail)) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 });
     }
 

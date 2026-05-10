@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import { getAdminApp } from '@/lib/firebase-admin';
+import { isAdminEmail } from '@/lib/admin-config';
 
 /**
  * Send order-receipt email to admin Gmail.
@@ -34,9 +35,12 @@ export async function POST(req: Request) {
 
     const adminApp = getAdminApp();
     let callerUid: string;
+    let callerEmail: string | null = null;
     try {
       const token = authHeader.split('Bearer ')[1];
-      callerUid = (await adminApp.auth().verifyIdToken(token)).uid;
+      const decoded = await adminApp.auth().verifyIdToken(token);
+      callerUid = decoded.uid;
+      callerEmail = decoded.email ?? null;
     } catch {
       return new Response(JSON.stringify({ error: 'Invalid token' }), {
         status: 401,
@@ -74,11 +78,15 @@ export async function POST(req: Request) {
     }
     const order = orderDoc.data() ?? {};
 
+    // Authorization: caller is the order owner OR is the hardcoded admin
+    // identity (verified email claim from the Firebase token, NOT the
+    // owner-writable `role` field on the user doc). The Firestore role
+    // approach was a self-promotion vector — defense in depth even though
+    // firestore.rules now block role mutation, since the rules and this
+    // gate need to agree even if either weakens later.
     let allowed = order.userUid === callerUid;
-    if (!allowed) {
-      const callerDoc = await db.collection('user').doc(callerUid).get();
-      const role = callerDoc.exists ? callerDoc.data()?.role : null;
-      allowed = role === 'admin' || role === 'manager';
+    if (!allowed && isAdminEmail(callerEmail)) {
+      allowed = true;
     }
     if (!allowed) {
       return new Response(JSON.stringify({ error: 'Forbidden' }), {
