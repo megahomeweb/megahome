@@ -304,16 +304,22 @@ export async function POST(req: NextRequest) {
           totalPrice += linePrice;
           totalQuantity += quantity;
 
+          // Build the snapshot with conditional spread so optional
+          // fields are OMITTED when missing — never `undefined`. This
+          // is defense-in-depth alongside the Firestore-level
+          // ignoreUndefinedProperties:true. Either alone would prevent
+          // the "Order creation failed" 500; both together make the
+          // failure mode impossible to regress accidentally.
           basketItems.push({
             id: productId,
             title: String(data.title ?? ''),
             price: String(data.price ?? '0'),
             costPrice: typeof data.costPrice === 'number' ? data.costPrice : 0,
             category: String(data.category ?? ''),
-            subcategory: data.subcategory ? String(data.subcategory) : undefined,
-            description: data.description ? String(data.description) : undefined,
+            ...(data.subcategory ? { subcategory: String(data.subcategory) } : {}),
+            ...(data.description ? { description: String(data.description) } : {}),
             productImageUrl: Array.isArray(data.productImageUrl) ? data.productImageUrl : [],
-            storageFileId: data.storageFileId ? String(data.storageFileId) : undefined,
+            ...(data.storageFileId ? { storageFileId: String(data.storageFileId) } : {}),
             quantity,
           });
 
@@ -360,7 +366,7 @@ export async function POST(req: NextRequest) {
           }
           const minOrder = Number(promoData.minOrderTotal) || 0;
           if (totalPrice < minOrder) {
-            const err = new Error(`Buyurtma kamida ${minOrder} soʻm boʻlishi kerak`);
+            const err = new Error(`Buyurtma kamida $${minOrder} boʻlishi kerak`);
             (err as Error & { promoError?: string }).promoError = 'min_order';
             throw err;
           }
@@ -520,8 +526,21 @@ export async function POST(req: NextRequest) {
           { status: 400 },
         );
       }
-      console.error('Order create transaction failed:', err);
-      return NextResponse.json({ error: 'Order creation failed' }, { status: 500 });
+      // Anything that reaches here is a real server-side failure
+      // (Firestore permission, undefined-value rejection, network).
+      // Log with a distinct tag so the row is easy to grep in Vercel
+      // logs, and pass the underlying message back in non-production
+      // so the operator can debug without SSH'ing into logs. In
+      // production we keep the message generic for the customer-facing
+      // case, but enrich the server log.
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[orders/create] transaction failed:', message, err);
+      return NextResponse.json(
+        process.env.NODE_ENV === 'production'
+          ? { error: 'Buyurtma yaratilmadi. Iltimos, qaytadan urinib koʻring.' }
+          : { error: 'Order creation failed', detail: message },
+        { status: 500 },
+      );
     }
 
     // ── Audit trail (post-commit; fire-and-forget but awaited as a batch) ──
