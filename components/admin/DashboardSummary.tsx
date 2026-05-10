@@ -1,7 +1,8 @@
 "use client";
-import { ShoppingCart, UserPlus, TrendingUp, Package, AlertTriangle, DollarSign } from "lucide-react";
+import { ShoppingCart, UserPlus, TrendingUp, TrendingDown, Package, AlertTriangle, DollarSign, HandCoins } from "lucide-react";
 import { useNotificationStore } from "@/store/useNotificationStore";
 import { formatUZS } from "@/lib/formatPrice";
+import { summarizeOrders } from "@/lib/orderMath";
 import Link from "next/link";
 import { ShineBorder } from "@/components/ui/shine-border";
 import useProductStore from "@/store/useProductStore";
@@ -36,27 +37,17 @@ const DashboardSummary = () => {
     [notifications]
   );
 
-  // Revenue from ALL delivered orders
-  const deliveredOrders = useMemo(
-    () => orders.filter((o) => o.status === 'yetkazildi'),
-    [orders]
-  );
-  const totalRevenue = useMemo(
-    () => deliveredOrders.reduce((sum, o) => sum + (o.totalPrice || 0), 0),
-    [deliveredOrders]
-  );
-
-  // Profit calculation from delivered orders
-  const totalProfit = useMemo(
-    () => deliveredOrders.reduce((sum, order) => {
-      let orderCost = 0;
-      for (const item of (order.basketItems || [])) {
-        orderCost += (item.costPrice || 0) * item.quantity;
-      }
-      return sum + ((order.totalPrice || 0) - orderCost);
-    }, 0),
-    [deliveredOrders]
-  );
+  // Canonical financial summary — uses `lib/orderMath.summarizeOrders` so
+  // the dashboard, reports, charts, and customer stats can never disagree.
+  // It correctly:
+  //   • uses netTotal (after discounts) for revenue, not gross totalPrice
+  //   • includes POS sales (source='pos') as completed even at status 'yangi'
+  //   • excludes 'bekor_qilindi'
+  const totals = useMemo(() => summarizeOrders(orders), [orders]);
+  const totalRevenue = totals.revenue;
+  const totalCost = totals.cost;
+  const totalProfit = totals.profit;
+  const outstandingNasiya = totals.outstandingNasiya;
 
   // Product stats
   const totalProducts = products.length;
@@ -140,53 +131,118 @@ const DashboardSummary = () => {
         </ShineBorder>
       </Link>
 
-      {/* Total Revenue */}
+      {/* ═══ Financial trio: Daromad − Tan narxi = Sof foyda ═══════ */}
+      {/* The three cards below tell one connected story. Daromad is what
+          came IN, Tan narxi is what was paid OUT for the goods, and Sof foyda
+          is the difference. Operators previously saw only Daromad + Sof foyda
+          and the math wasn't transparent — adding Tan narxi makes it
+          obvious where the money goes. */}
+
+      {/* Daromad (Revenue) */}
+      <Link href="/admin/reports">
+        <ShineBorder
+          color={totalRevenue > 0 ? ["#10b981", "#059669", "#34d399"] : ["#e5e7eb"]}
+          borderWidth={totalRevenue > 0 ? 2 : 1}
+          duration={totalRevenue > 0 ? 10 : 25}
+          className="hover:shadow-lg transition-shadow"
+        >
+          <div className="relative overflow-hidden w-full rounded-xl p-2 sm:p-4 min-w-0">
+            <div className="flex items-start justify-between gap-1 sm:gap-2">
+              <div className="min-w-0">
+                <p className="text-[11px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Daromad</p>
+                <p className={`text-sm sm:text-2xl font-bold mt-0.5 sm:mt-1 tabular-nums truncate ${totalRevenue > 0 ? "text-green-600" : "text-gray-400"}`}>
+                  {totalRevenue > 0 ? formatUZS(totalRevenue) : '0$'}
+                </p>
+                <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">
+                  {totals.count > 0 ? `${totals.count} ta sotuv` : "Tugallangan sotuvlardan"}
+                </p>
+              </div>
+              <div className={`flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl shrink-0 ${totalRevenue > 0 ? "bg-emerald-100" : "bg-gray-100"}`}>
+                <TrendingUp className={`size-3.5 sm:size-5 ${totalRevenue > 0 ? "text-emerald-600" : "text-gray-400"}`} />
+              </div>
+            </div>
+          </div>
+        </ShineBorder>
+      </Link>
+
+      {/* Tan narxi (Cost of goods sold) — the bridge that makes Daromad → Sof foyda math obvious */}
       <ShineBorder
-        color={totalRevenue > 0 ? ["#10b981", "#059669", "#34d399"] : ["#e5e7eb"]}
-        borderWidth={totalRevenue > 0 ? 2 : 1}
-        duration={totalRevenue > 0 ? 10 : 25}
+        color={["#94a3b8", "#64748b", "#cbd5e1"]}
+        borderWidth={totalCost > 0 ? 2 : 1}
+        duration={25}
         className="hover:shadow-lg transition-shadow"
       >
         <div className="relative overflow-hidden w-full rounded-xl p-2 sm:p-4 min-w-0">
           <div className="flex items-start justify-between gap-1 sm:gap-2">
             <div className="min-w-0">
-              <p className="text-[11px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Daromad</p>
-              <p className={`text-sm sm:text-2xl font-bold mt-0.5 sm:mt-1 tabular-nums truncate ${totalRevenue > 0 ? "text-green-600" : "text-gray-400"}`}>
-                {totalRevenue > 0 ? formatUZS(totalRevenue) : '0$'}
+              <p className="text-[11px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Tan narxi</p>
+              <p className={`text-sm sm:text-2xl font-bold mt-0.5 sm:mt-1 tabular-nums truncate ${totalCost > 0 ? "text-slate-600" : "text-gray-400"}`}>
+                {totalCost > 0 ? formatUZS(totalCost) : '0$'}
               </p>
-              <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">Yetkazilganlardan</p>
+              <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">Sotilgan tovarlar</p>
             </div>
-            <div className={`flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl shrink-0 ${totalRevenue > 0 ? "bg-emerald-100" : "bg-gray-100"}`}>
-              <TrendingUp className={`size-3.5 sm:size-5 ${totalRevenue > 0 ? "text-emerald-600" : "text-gray-400"}`} />
+            <div className={`flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl shrink-0 ${totalCost > 0 ? "bg-slate-100" : "bg-gray-100"}`}>
+              <TrendingDown className={`size-3.5 sm:size-5 ${totalCost > 0 ? "text-slate-600" : "text-gray-400"}`} />
             </div>
           </div>
         </div>
       </ShineBorder>
 
-      {/* Profit */}
+      {/* Sof foyda (Net profit) = Daromad − Tan narxi */}
       <ShineBorder
-        color={totalProfit > 0 ? ["#f59e0b", "#d97706", "#fbbf24"] : ["#e5e7eb"]}
-        borderWidth={totalProfit > 0 ? 2 : 1}
-        duration={totalProfit > 0 ? 10 : 25}
+        color={totalProfit > 0 ? ["#f59e0b", "#d97706", "#fbbf24"] : totalProfit < 0 ? ["#ef4444", "#dc2626"] : ["#e5e7eb"]}
+        borderWidth={totalProfit !== 0 ? 2 : 1}
+        duration={totalProfit !== 0 ? 10 : 25}
         className="hover:shadow-lg transition-shadow"
       >
         <div className="relative overflow-hidden w-full rounded-xl p-2 sm:p-4 min-w-0">
           <div className="flex items-start justify-between gap-1 sm:gap-2">
             <div className="min-w-0">
               <p className="text-[11px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Sof foyda</p>
-              <p className={`text-sm sm:text-2xl font-bold mt-0.5 sm:mt-1 tabular-nums truncate ${totalProfit > 0 ? "text-amber-600" : "text-gray-400"}`}>
-                {totalProfit > 0 ? formatUZS(totalProfit) : '0$'}
+              <p className={`text-sm sm:text-2xl font-bold mt-0.5 sm:mt-1 tabular-nums truncate ${totalProfit > 0 ? "text-amber-600" : totalProfit < 0 ? "text-red-600" : "text-gray-400"}`}>
+                {totalProfit !== 0 ? formatUZS(totalProfit) : '0$'}
               </p>
               <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">
-                {totalRevenue > 0 ? `Marja: ${((totalProfit / totalRevenue) * 100).toFixed(1)}%` : "Tan narxni kiriting"}
+                {totalRevenue > 0
+                  ? `Marja: ${totals.margin.toFixed(1)}%`
+                  : totalCost > 0
+                    ? "Sotilgan-yo'q"
+                    : "Tan narxni kiriting"}
               </p>
             </div>
-            <div className={`flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl shrink-0 ${totalProfit > 0 ? "bg-amber-100" : "bg-gray-100"}`}>
-              <DollarSign className={`size-3.5 sm:size-5 ${totalProfit > 0 ? "text-amber-600" : "text-gray-400"}`} />
+            <div className={`flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl shrink-0 ${totalProfit > 0 ? "bg-amber-100" : totalProfit < 0 ? "bg-red-100" : "bg-gray-100"}`}>
+              <DollarSign className={`size-3.5 sm:size-5 ${totalProfit > 0 ? "text-amber-600" : totalProfit < 0 ? "text-red-600" : "text-gray-400"}`} />
             </div>
           </div>
         </div>
       </ShineBorder>
+
+      {/* Qarzdorlik (Outstanding nasiya — money customers still owe) */}
+      {outstandingNasiya > 0 && (
+        <Link href="/admin/customers">
+          <ShineBorder
+            color={["#a855f7", "#9333ea", "#c084fc"]}
+            borderWidth={2}
+            duration={12}
+            className="hover:shadow-lg transition-shadow"
+          >
+            <div className="relative overflow-hidden w-full rounded-xl p-2 sm:p-4 min-w-0">
+              <div className="flex items-start justify-between gap-1 sm:gap-2">
+                <div className="min-w-0">
+                  <p className="text-[11px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Qarzdorlik</p>
+                  <p className="text-sm sm:text-2xl font-bold text-purple-600 mt-0.5 sm:mt-1 tabular-nums truncate">
+                    {formatUZS(outstandingNasiya)}
+                  </p>
+                  <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">Nasiya qoldiq</p>
+                </div>
+                <div className="flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl shrink-0 bg-purple-100">
+                  <HandCoins className="size-3.5 sm:size-5 text-purple-600" />
+                </div>
+              </div>
+            </div>
+          </ShineBorder>
+        </Link>
+      )}
 
       {/* Low Stock Alert */}
       <ShineBorder

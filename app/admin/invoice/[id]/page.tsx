@@ -5,6 +5,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { fireDB } from '@/firebase/config';
 import { Order } from '@/lib/types';
 import { formatUZS } from '@/lib/formatPrice';
+import { orderRevenue } from '@/lib/orderMath';
 import { formatDateUz, formatTimeUz } from "@/lib/formatDate";
 import { getStatusInfo } from '@/lib/orderStatus';
 import { Printer, Share2, Copy, Link as LinkIcon, MapPin, Banknote } from 'lucide-react';
@@ -150,7 +151,12 @@ const InvoicePage = () => {
   const items = order.basketItems || [];
 
   const totalQuantity = order.totalQuantity;
-  const totalPrice = order.totalPrice;
+  // Use net total (after promo + ticket discount) when present so the
+  // invoice's "Profit" reflects what the customer actually paid, not the
+  // gross subtotal.
+  const totalPrice = orderRevenue(order);
+  const grossPrice = order.totalPrice;
+  const discountTotal = grossPrice - totalPrice;
 
   // Cost & profit (only if costPrice available on at least one item)
   const hasCostData = items.some((item) => item.costPrice != null && item.costPrice > 0);

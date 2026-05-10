@@ -3,7 +3,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import PanelTitle from '@/components/admin/PanelTitle';
 import { useOrderStore } from '@/store/useOrderStore';
 import { formatUZS } from '@/lib/formatPrice';
-import { getStatusInfo } from '@/lib/orderStatus';
+import { isCompletedSale, orderRevenue, orderCost } from '@/lib/orderMath';
 import { TrendingUp, TrendingDown, DollarSign, ShoppingCart, BarChart3 } from 'lucide-react';
 import RevenueChart from '@/components/admin/charts/RevenueChart';
 import DailyOrdersChart from '@/components/admin/charts/DailyOrdersChart';
@@ -34,7 +34,7 @@ const ReportsPage = () => {
     const startDate = getStartDate(period);
     const startMs = startDate.getTime();
 
-    let deliveredCount = 0, cancelledCount = 0, pendingCount = 0;
+    let completedCount = 0, cancelledCount = 0, pendingCount = 0;
     let totalRevenue = 0, totalCost = 0, totalItems = 0;
     const productProfitMap: Record<string, { title: string; revenue: number; cost: number; qty: number }> = {};
 
@@ -42,25 +42,45 @@ const ReportsPage = () => {
       const orderDate = o.date?.seconds ? o.date.seconds * 1000 : 0;
       if (orderDate < startMs) continue;
 
-      if (o.status === 'yetkazildi') {
-        deliveredCount++;
-        totalRevenue += o.totalPrice || 0;
-        totalItems += o.totalQuantity || 0;
-        for (const item of (o.basketItems || [])) {
-          const itemCost = (item.costPrice || 0) * item.quantity;
-          totalCost += itemCost;
-          const key = item.id || item.title;
-          if (!productProfitMap[key]) {
-            productProfitMap[key] = { title: item.title, revenue: 0, cost: 0, qty: 0 };
-          }
-          productProfitMap[key].revenue += Number(item.price) * item.quantity;
-          productProfitMap[key].cost += itemCost;
-          productProfitMap[key].qty += item.quantity;
-        }
-      } else if (o.status === 'bekor_qilindi') {
+      if (o.status === 'bekor_qilindi') {
         cancelledCount++;
-      } else {
+        continue;
+      }
+      if (!isCompletedSale(o)) {
         pendingCount++;
+        continue;
+      }
+
+      // Completed sale (delivered web/telegram OR POS).
+      completedCount++;
+      const oRevenue = orderRevenue(o);
+      const oCost = orderCost(o);
+      totalRevenue += oRevenue;
+      totalCost += oCost;
+      totalItems += o.totalQuantity || 0;
+
+      // Per-product breakdown. Allocate the order-level discount
+      // proportionally by line-gross so the per-product revenue still
+      // sums to the order's net total. Without this, a 10%-off order
+      // would credit each line at its gross price and the topProducts
+      // table would overstate.
+      const orderGross = (o.basketItems || []).reduce(
+        (s, item) => s + Number(item.price) * item.quantity,
+        0,
+      );
+      const discountFactor = orderGross > 0 ? oRevenue / orderGross : 1;
+
+      for (const item of (o.basketItems || [])) {
+        const lineGross = Number(item.price) * item.quantity;
+        const lineNet = lineGross * discountFactor;
+        const itemCost = (item.costPrice || 0) * item.quantity;
+        const key = item.id || item.title;
+        if (!productProfitMap[key]) {
+          productProfitMap[key] = { title: item.title, revenue: 0, cost: 0, qty: 0 };
+        }
+        productProfitMap[key].revenue += lineNet;
+        productProfitMap[key].cost += itemCost;
+        productProfitMap[key].qty += item.quantity;
       }
     }
 
@@ -72,8 +92,10 @@ const ReportsPage = () => {
       .slice(0, 10);
 
     return {
-      totalOrders: deliveredCount + cancelledCount + pendingCount,
-      deliveredCount, cancelledCount, pendingCount,
+      totalOrders: completedCount + cancelledCount + pendingCount,
+      deliveredCount: completedCount,
+      cancelledCount,
+      pendingCount,
       totalRevenue, totalCost, totalProfit, profitMargin,
       totalItems, topProducts,
     };

@@ -444,12 +444,20 @@ export async function POST(req: NextRequest) {
           else resolvedPaymentMethod = validatedBreakdown[0].method;
         }
 
+        // Default status by source. POS sales are final at the counter
+        // (cash/card paid, customer leaves with goods) so they go straight
+        // to 'yetkazildi' — otherwise the dashboard never shows POS revenue
+        // until somebody manually moves each ticket through the workflow.
+        // Web / Telegram / Admin-on-behalf orders still need fulfilment.
+        const initialStatus: 'yangi' | 'yetkazildi' =
+          validatedSource === 'pos' ? 'yetkazildi' : 'yangi';
+
         tx.set(orderRef, {
           clientName: clientName.trim(),
           clientPhone: clientPhone.trim(),
           userUid: orderUserUid,
           date: orderTimestamp,
-          status: 'yangi',
+          status: initialStatus,
           basketItems,
           totalPrice,
           totalQuantity,

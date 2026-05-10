@@ -4,6 +4,7 @@ import { useOrderStore } from '@/store/useOrderStore';
 import useProductStore from '@/store/useProductStore';
 import { useNotificationStore } from '@/store/useNotificationStore';
 import { telegramNotify } from '@/lib/telegram/notify-client';
+import { isCompletedSale, summarizeOrders } from '@/lib/orderMath';
 
 function getTodayString() {
   const d = new Date();
@@ -32,18 +33,15 @@ const DailySummaryGenerator = () => {
       return o.date.seconds * 1000 >= startMs;
     });
 
-    const delivered = todayOrders.filter((o) => o.status === 'yetkazildi');
+    // Same definition the dashboard / charts / reports use:
+    // a sale "completes" when it's delivered OR comes from POS.
+    const completed = todayOrders.filter(isCompletedSale);
     const cancelled = todayOrders.filter((o) => o.status === 'bekor_qilindi');
     const newOrd = todayOrders.filter((o) => o.status === 'yangi');
 
-    const revenue = delivered.reduce((s, o) => s + (o.totalPrice || 0), 0);
-    const profit = delivered.reduce((s, o) => {
-      const cost = (o.basketItems ?? []).reduce(
-        (c, item) => c + (item.costPrice || 0) * item.quantity,
-        0
-      );
-      return s + ((o.totalPrice || 0) - cost);
-    }, 0);
+    const totals = summarizeOrders(todayOrders);
+    const revenue = totals.revenue;
+    const profit = totals.profit;
 
     const lowStockCount = products.filter(
       (p) => p.stock !== undefined && p.stock !== null && (p.stock as number) <= 5
@@ -57,7 +55,7 @@ const DailySummaryGenerator = () => {
     const summaryData = {
       totalOrders: todayOrders.length,
       newOrders: newOrd.length,
-      deliveredOrders: delivered.length,
+      deliveredOrders: completed.length,
       cancelledOrders: cancelled.length,
       revenue,
       profit,

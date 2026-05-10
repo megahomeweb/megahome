@@ -12,6 +12,7 @@ import {
 import { IoIosArrowDown } from 'react-icons/io';
 import Image from 'next/image';
 import { formatUZS } from '@/lib/formatPrice';
+import { orderRevenue, orderCost } from '@/lib/orderMath';
 import { formatDateTimeShort } from "@/lib/formatDate";
 import { matchesSearch } from '@/lib/searchMatch';
 import { ORDER_STATUSES, getStatusInfo } from '@/lib/orderStatus';
@@ -263,11 +264,11 @@ const Orders = () => {
                         </div>
                         <div>
                           <p className="text-[10px] text-gray-400 uppercase">Sotish</p>
-                          <p className="text-xs sm:text-sm font-bold text-green-700">{formatUZS(order.totalPrice)}</p>
+                          <p className="text-xs sm:text-sm font-bold text-green-700">{formatUZS(orderRevenue(order))}</p>
                         </div>
                         {(() => {
-                          const cost = (order.basketItems || []).reduce((s, i) => s + (i.costPrice || 0) * i.quantity, 0);
-                          const profit = (order.totalPrice || 0) - cost;
+                          const cost = orderCost(order);
+                          const profit = orderRevenue(order) - cost;
                           if (cost <= 0) return null;
                           return (
                             <>

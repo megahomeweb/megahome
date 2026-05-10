@@ -7,6 +7,7 @@ import { useOrderStore } from '@/store/useOrderStore';
 import { useAuthStore } from '@/store/authStore';
 import type { UserData } from '@/store/authStore';
 import { formatUZS } from '@/lib/formatPrice';
+import { isCompletedSale, orderRevenue, orderCost } from '@/lib/orderMath';
 import { matchesSearch } from '@/lib/searchMatch';
 import { Crown, TrendingUp, ShoppingCart, Phone, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -55,14 +56,14 @@ const CustomersPage = () => {
       const orderDate = order.date?.seconds ? order.date.seconds * 1000 : 0;
       if (orderDate > s.lastOrderDate) s.lastOrderDate = orderDate;
 
-      if (order.status === 'yetkazildi') {
+      // "Spent / profit" tally uses the same definition the dashboard uses:
+      // a completed sale is delivered web-order OR a POS sale, valued at
+      // netTotal (after promo + ticket discount), not gross totalPrice.
+      if (isCompletedSale(order)) {
         s.deliveredOrders++;
-        s.totalSpent += order.totalPrice || 0;
-        let cost = 0;
-        for (const item of (order.basketItems || [])) {
-          cost += (item.costPrice || 0) * item.quantity;
-        }
-        s.totalProfit += (order.totalPrice || 0) - cost;
+        const rev = orderRevenue(order);
+        s.totalSpent += rev;
+        s.totalProfit += rev - orderCost(order);
       }
     }
 

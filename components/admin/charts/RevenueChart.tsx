@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from "recharts";
 import { Order } from "@/lib/types";
 import { formatUZS } from "@/lib/formatPrice";
+import { isCompletedSale, orderRevenue, orderCost } from "@/lib/orderMath";
 
 interface RevenueChartProps {
   orders: Order[];
@@ -25,13 +26,14 @@ export default function RevenueChart({ orders, days = 14 }: RevenueChartProps) {
       let cost = 0;
 
       for (const o of orders) {
-        if (o.status !== "yetkazildi") continue;
+        // Match dashboard / reports: count any completed sale (delivered web
+        // orders + POS sales), use netTotal not gross totalPrice so promo /
+        // ticket discounts are honoured.
+        if (!isCompletedSale(o)) continue;
         const ts = o.date?.seconds ? o.date.seconds * 1000 : 0;
         if (ts >= d.getTime() && ts < nextDay.getTime()) {
-          revenue += o.totalPrice || 0;
-          for (const item of o.basketItems || []) {
-            cost += (item.costPrice || 0) * item.quantity;
-          }
+          revenue += orderRevenue(o);
+          cost += orderCost(o);
         }
       }
 

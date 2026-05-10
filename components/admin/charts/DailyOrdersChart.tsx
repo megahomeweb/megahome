@@ -2,6 +2,7 @@
 import { useMemo } from "react";
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from "recharts";
 import { Order } from "@/lib/types";
+import { isCompletedSale } from "@/lib/orderMath";
 
 interface DailyOrdersChartProps {
   orders: Order[];
@@ -27,7 +28,9 @@ export default function DailyOrdersChart({ orders, days = 14 }: DailyOrdersChart
         const ts = o.date?.seconds ? o.date.seconds * 1000 : 0;
         if (ts >= d.getTime() && ts < nextDay.getTime()) {
           total++;
-          if (o.status === "yetkazildi") delivered++;
+          // "yetkazildi" green bar = any completed sale (delivered web orders
+          // + POS cash sales). Previously POS sales were missing from this bar.
+          if (isCompletedSale(o)) delivered++;
         }
       }
 
