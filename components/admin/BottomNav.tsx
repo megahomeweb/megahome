@@ -15,6 +15,12 @@ const BottomNav = () => {
 
   const newOrderCount = notifications.filter((n) => !n.read && n.type === 'new_order').length;
 
+  // Hide BottomNav on the POS screen — POS owns its own bottom action bar
+  // (Yangi / Yakunlash) at the same z-index, and stacking both made the
+  // primary "Finish sale" button physically untappable on phones. Per
+  // mobile audit P0-1.
+  if (pathname?.startsWith('/admin/sotuv')) return null;
+
   const isActive = (path: string) => pathname === path;
   const isActiveGroup = (paths: string[]) => paths.some((p) => pathname.startsWith(p));
 
@@ -74,7 +80,7 @@ const BottomNav = () => {
                     }`}
                   >
                     <item.icon className="size-5" />
-                    <span className="text-[10px] font-medium">{item.label}</span>
+                    <span className="text-[11px] font-medium">{item.label}</span>
                   </Link>
                 );
               })}
@@ -103,7 +109,7 @@ const BottomNav = () => {
                 }`}
               >
                 <tab.icon className={`size-5 ${tab.active ? 'stroke-[2.5]' : ''}`} />
-                <span className={`text-[10px] ${tab.active ? 'font-bold' : 'font-medium'}`}>{tab.label}</span>
+                <span className={`text-[11px] ${tab.active ? 'font-bold' : 'font-medium'}`}>{tab.label}</span>
                 {'badge' in tab && tab.badge && (
                   <span className="absolute top-0 right-1/2 -mr-4 flex items-center justify-center min-w-4 h-4 px-1 text-[9px] font-bold text-white bg-green-500 rounded-full animate-pulse">
                     {tab.badge > 9 ? '9+' : tab.badge}
@@ -121,7 +127,7 @@ const BottomNav = () => {
             }`}
           >
             <Menu className={`size-5 ${showMore || moreIsActive ? 'stroke-[2.5]' : ''}`} />
-            <span className={`text-[10px] ${showMore || moreIsActive ? 'font-bold' : 'font-medium'}`}>Yana</span>
+            <span className={`text-[11px] ${showMore || moreIsActive ? 'font-bold' : 'font-medium'}`}>Yana</span>
           </button>
         </div>
       </nav>

@@ -244,7 +244,7 @@ const LoginForm = () => {
             <input
               type='email'
               placeholder="Sizning emailingiz"
-              className={`form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-xl text-black focus:outline-0 focus:ring-0 border-none bg-[#EEEEEE] focus:border-none h-10 placeholder:text-[#6B6B6B] p-4 text-base font-normal leading-normal ${
+              className={`form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-xl text-black focus:outline-0 focus:ring-0 border-none bg-[#EEEEEE] focus:border-none h-12 placeholder:text-[#6B6B6B] p-4 text-base font-normal leading-normal ${
                 errors.email ? 'border-red-500 border-2' : ''
               }`}
               {...register('email', {
@@ -266,7 +266,7 @@ const LoginForm = () => {
             <input
               type='password'
               placeholder="Sizning parolingiz"
-              className={`form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-xl text-black focus:outline-0 focus:ring-0 border-none bg-[#EEEEEE] focus:border-none h-10 placeholder:text-[#6B6B6B] p-4 text-base font-normal leading-normal ${
+              className={`form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-xl text-black focus:outline-0 focus:ring-0 border-none bg-[#EEEEEE] focus:border-none h-12 placeholder:text-[#6B6B6B] p-4 text-base font-normal leading-normal ${
                 errors.password ? 'border-red-500 border-2' : ''
               }`}
               {...register('password', {

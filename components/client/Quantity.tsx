@@ -32,17 +32,19 @@ const Quantity = ({id}: {id: string}) => {
         variant={'outline'}
         onClick={handleDeleteQuantity}
         disabled={quantityInBasket == 0}
-        className="cursor-pointer size-9 bg-gray-200 flex items-center justify-center rounded-full"
+        aria-label="Kamaytirish"
+        className="cursor-pointer size-11 bg-gray-200 flex items-center justify-center rounded-full"
       >
         <HiMinus className="text-black" />
       </Button>
       <div className="w-14 border-b">
-        <span className="block text-center">{quantityInBasket}</span>
+        <span className="block text-center tabular-nums">{quantityInBasket}</span>
       </div>
       <Button
         onClick={handleAddQuantity}
         disabled={quantityInBasket >= stock}
-        className="cursor-pointer size-9 bg-black text-white flex items-center justify-center rounded-full disabled:opacity-40"
+        aria-label="Ko'paytirish"
+        className="cursor-pointer size-11 bg-black text-white flex items-center justify-center rounded-full disabled:opacity-40"
       >
         <LuPlus className="text-white" />
       </Button>

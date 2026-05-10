@@ -145,12 +145,15 @@ const SubmitModal = ({ setOpen }: props) => {
   };
 
   return (
-    <div className="fixed z-99 w-full h-full inset-0 flex items-center justify-center">
+    <div className="fixed z-99 w-full h-full inset-0 flex items-end sm:items-center justify-center">
       <div
         onClick={() => setOpen(false)}
         className="absolute inset-0 size-full bg-black/80 z-0"
       ></div>
-      <form onSubmit={handleSubmit(onSubmit)} className="max-w-md w-full bg-white rounded-md space-y-3 p-5 z-10 max-h-[90vh] overflow-y-auto">
+      <form
+        onSubmit={handleSubmit(onSubmit)}
+        className="max-w-md w-full bg-white rounded-t-3xl sm:rounded-md space-y-3 p-5 z-10 max-h-[92dvh] overflow-y-auto pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-5"
+      >
         {/* Order summary */}
         <div className="bg-gray-50 rounded-xl p-3 mb-4">
           <p className="text-sm font-bold text-gray-900 mb-2">Buyurtma ({totalQuantity} ta mahsulot)</p>
@@ -176,7 +179,7 @@ const SubmitModal = ({ setOpen }: props) => {
               id="first-name"
               type="text"
               autoComplete="given-name"
-              className={`block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:outline-none focus:ring-inset focus:ring-indigo-600 sm:text-sm px-2 ${errors.firstName ? 'border-red-500 border-2' : ''}`}
+              className={`block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:outline-none focus:ring-inset focus:ring-indigo-600 text-base sm:text-sm px-2 ${errors.firstName ? 'border-red-500 border-2' : ''}`}
               {...register("firstName", {
                 required: "Ism majburiy kiritilishi kerak",
                 minLength: { value: 2, message: "Ism kamida 2 ta belgidan iborat bo'lishi kerak" },
@@ -191,9 +194,11 @@ const SubmitModal = ({ setOpen }: props) => {
           <div className="mt-1">
             <input
               id="phone-number"
-              type="text"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
               placeholder="+998 (__) ___-__-__"
-              className={`block w-full rounded-md border-0 py-2 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:outline-none focus:ring-inset focus:ring-indigo-600 sm:text-sm px-2 ${errors.phoneNumber ? 'border-red-500 border-2' : ''}`}
+              className={`block w-full rounded-md border-0 py-2 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:outline-none focus:ring-inset focus:ring-indigo-600 text-base sm:text-sm px-2 ${errors.phoneNumber ? 'border-red-500 border-2' : ''}`}
               value={watch("phoneNumber")}
               {...register("phoneNumber", {
                 required: "Telefon raqami majburiy kiritilishi kerak",
@@ -218,7 +223,7 @@ const SubmitModal = ({ setOpen }: props) => {
               id="delivery-address"
               rows={2}
               placeholder="Shahar, tuman, ko'cha, uy raqami..."
-              className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:outline-none focus:ring-inset focus:ring-indigo-600 sm:text-sm px-2 resize-none"
+              className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:outline-none focus:ring-inset focus:ring-indigo-600 text-base sm:text-sm px-2 resize-none"
               {...register("deliveryAddress")}
             />
           </div>
@@ -234,7 +239,7 @@ const SubmitModal = ({ setOpen }: props) => {
               id="order-note"
               rows={2}
               placeholder="Maxsus ko'rsatmalar, yetkazish vaqti..."
-              className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:outline-none focus:ring-inset focus:ring-indigo-600 sm:text-sm px-2 resize-none"
+              className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:outline-none focus:ring-inset focus:ring-indigo-600 text-base sm:text-sm px-2 resize-none"
               {...register("orderNote")}
             />
           </div>

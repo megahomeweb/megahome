@@ -831,8 +831,8 @@ export default function PosScreen() {
 
           {/* Cart table */}
           <div className="flex-1 overflow-auto px-3 sm:px-5 pb-4">
-            {/* Header row */}
-            <div className="grid grid-cols-[24px_minmax(0,1.5fr)_60px_minmax(120px,1fr)_70px_90px_90px_64px] gap-2 px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 border-b border-gray-200 sticky top-0 bg-gray-50 z-10">
+            {/* Header row — desktop grid only. Mobile uses card layout per CartRow. */}
+            <div className="hidden lg:grid grid-cols-[24px_minmax(0,1.5fr)_60px_minmax(120px,1fr)_70px_90px_90px_64px] gap-2 px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 border-b border-gray-200 sticky top-0 bg-gray-50 z-10">
               <span>#</span>
               <span>Nomi</span>
               <span className="hidden md:inline">SKU</span>
@@ -850,6 +850,23 @@ export default function PosScreen() {
                   <BroomIcon className="size-4" />
                 </button>
               </span>
+            </div>
+            {/* Mobile mini-header with clear-cart shortcut. The big grid above
+                forced ~518px of horizontal space on phones — operators were
+                stuck scrolling the cart sideways to reach the qty input. */}
+            <div className="lg:hidden flex items-center justify-between px-1 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 border-b border-gray-200 sticky top-0 bg-gray-50 z-10">
+              <span>{cart.length > 0 ? `${cart.length} qator` : "Savat"}</span>
+              {cart.length > 0 && (
+                <button
+                  onClick={clearCart}
+                  className="inline-flex items-center justify-center gap-1 px-2 h-7 hover:bg-red-50 rounded-md text-red-500 active:scale-95 transition"
+                  title="Savatni tozalash"
+                  aria-label="Savatni tozalash"
+                >
+                  <BroomIcon className="size-3.5" />
+                  <span>Tozalash</span>
+                </button>
+              )}
             </div>
 
             {cart.length === 0 ? (
@@ -1086,103 +1103,143 @@ function CartRow({
   const stockNum = typeof product.stock === "number" ? product.stock : 0;
   const stockOver = !!qty && qty > stockNum;
 
+  // Two layouts so phones don't get the 518px-wide desktop grid:
+  //   • lg+ keeps the original 8-column table grid.
+  //   • <lg renders a mobile card with title row + qty/price/total row.
   return (
-    <div className="grid grid-cols-[24px_minmax(0,1.5fr)_60px_minmax(120px,1fr)_70px_90px_90px_64px] gap-2 px-2 py-2.5 items-start border-b border-gray-100 hover:bg-gray-50/50 transition-colors">
-      {/* # */}
-      <span className="text-sm text-gray-500 pt-2.5 tabular-nums">{index}</span>
-
-      {/* Nomi */}
-      <div className="min-w-0 flex items-center gap-2 pt-1.5">
-        <div className="relative size-9 rounded-md bg-gray-100 overflow-hidden shrink-0">
-          {product.productImageUrl?.[0]?.url ? (
-            <Image src={product.productImageUrl[0].url} alt={product.title} fill className="object-cover" sizes="36px" />
-          ) : (
-            <div className="size-full flex items-center justify-center"><Package className="size-4 text-gray-300" /></div>
+    <>
+      {/* Desktop grid */}
+      <div className="hidden lg:grid grid-cols-[24px_minmax(0,1.5fr)_60px_minmax(120px,1fr)_70px_90px_90px_64px] gap-2 px-2 py-2.5 items-start border-b border-gray-100 hover:bg-gray-50/50 transition-colors">
+        <span className="text-sm text-gray-500 pt-2.5 tabular-nums">{index}</span>
+        <div className="min-w-0 flex items-center gap-2 pt-1.5">
+          <div className="relative size-9 rounded-md bg-gray-100 overflow-hidden shrink-0">
+            {product.productImageUrl?.[0]?.url ? (
+              <Image src={product.productImageUrl[0].url} alt={product.title} fill className="object-cover" sizes="36px" />
+            ) : (
+              <div className="size-full flex items-center justify-center"><Package className="size-4 text-gray-300" /></div>
+            )}
+          </div>
+          <p className="text-sm text-gray-900 line-clamp-2 leading-tight">{product.title}</p>
+        </div>
+        <span className="text-sm text-gray-700 pt-2.5 hidden md:block">{(product.id || "").slice(0, 8)}</span>
+        <div className="min-w-0">
+          <div className="relative">
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              placeholder="Miqdorni kiriting"
+              value={qty === null ? "" : String(qty)}
+              onChange={(e) => onSetQty(e.target.value.replace(/[^0-9]/g, ""))}
+              onFocus={(e) => e.target.select()}
+              className={`w-full h-9 px-2.5 rounded-md text-sm font-medium outline-none tabular-nums transition ${
+                isInvalid
+                  ? "border border-red-300 bg-red-50/50 text-red-700 focus:border-red-400 focus:ring-2 focus:ring-red-100 placeholder:text-red-400"
+                  : "border border-gray-300 bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              }`}
+            />
+          </div>
+          {isInvalid && (
+            <p className="mt-1 text-[10px] text-red-500 leading-tight">0 dan katta qiymat kiriting</p>
+          )}
+          {!isInvalid && stockOver && (
+            <p className="mt-1 text-[10px] text-amber-600 leading-tight">Omborda atigi {stockNum} dona</p>
           )}
         </div>
-        <p className="text-sm text-gray-900 line-clamp-2 leading-tight">{product.title}</p>
-      </div>
-
-      {/* SKU */}
-      <span className="text-sm text-gray-700 pt-2.5 hidden md:block">{(product.id || "").slice(0, 8)}</span>
-
-      {/* Miqdor — the bito-faithful input */}
-      <div className="min-w-0">
-        <div className="relative">
-          <input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            placeholder="Miqdorni kiriting"
-            value={qty === null ? "" : String(qty)}
-            onChange={(e) => onSetQty(e.target.value.replace(/[^0-9]/g, ""))}
-            onFocus={(e) => e.target.select()}
-            className={`w-full h-9 px-2.5 rounded-md text-sm font-medium outline-none tabular-nums transition ${
-              isInvalid
-                ? "border border-red-300 bg-red-50/50 text-red-700 focus:border-red-400 focus:ring-2 focus:ring-red-100 placeholder:text-red-400"
-                : "border border-gray-300 bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-            }`}
-          />
+        <span className="text-sm text-gray-700 pt-2.5 tabular-nums hidden md:block">
+          {qty && qty > 0 ? `${qty} dona` : "0 dona"}
+        </span>
+        <span className="text-sm text-gray-900 pt-2.5 text-right tabular-nums">
+          {formatNumber(Number(product.price))}
+        </span>
+        <div className="pt-2.5 text-right">
+          <p className={`text-sm tabular-nums font-semibold ${isInvalid ? "text-gray-400" : "text-gray-900"}`}>
+            {isInvalid ? "0" : formatNumber(netLine)}
+          </p>
+          {lineDiscAmt > 0 && (
+            <p className="text-[10px] text-amber-600 tabular-nums">−{formatNumber(lineDiscAmt)}</p>
+          )}
+          {line.note && (
+            <p className="text-[10px] text-blue-500 truncate max-w-[80px] ml-auto" title={line.note}>
+              📝 {line.note.slice(0, 16)}{line.note.length > 16 ? "…" : ""}
+            </p>
+          )}
         </div>
-        {isInvalid && (
-          <p className="mt-1 text-[10px] text-red-500 leading-tight">0 dan katta qiymat kiriting</p>
-        )}
-        {!isInvalid && stockOver && (
-          <p className="mt-1 text-[10px] text-amber-600 leading-tight">Omborda atigi {stockNum} dona</p>
-        )}
+        <div className="flex items-center gap-1 pt-1.5 justify-end">
+          <button onClick={onClone} title="Nusxa" aria-label="Nusxa" className="size-8 rounded-md hover:bg-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-700 active:scale-95 transition">
+            <Copy className="size-3.5" />
+          </button>
+          <button onClick={onRemove} title="O'chirish" aria-label="Qatorni o'chirish" className="size-8 rounded-full border-2 border-red-300 hover:bg-red-50 hover:border-red-500 flex items-center justify-center text-red-500 active:scale-95 transition">
+            <Minus className="size-3.5" />
+          </button>
+        </div>
       </div>
 
-      {/* Jami miqdor (bito shows "X dona") */}
-      <span className="text-sm text-gray-700 pt-2.5 tabular-nums hidden md:block">
-        {qty && qty > 0 ? `${qty} dona` : "0 dona"}
-      </span>
-
-      {/* Narx */}
-      <span className="text-sm text-gray-900 pt-2.5 text-right tabular-nums">
-        {formatNumber(Number(product.price))}
-      </span>
-
-      {/* Jami narxi — 0 if invalid, otherwise NET (after per-line discount) */}
-      <div className="pt-2.5 text-right">
-        <p
-          className={`text-sm tabular-nums font-semibold ${
-            isInvalid ? "text-gray-400" : "text-gray-900"
-          }`}
-        >
-          {isInvalid ? "0" : formatNumber(netLine)}
-        </p>
-        {lineDiscAmt > 0 && (
-          <p className="text-[10px] text-amber-600 tabular-nums">
-            −{formatNumber(lineDiscAmt)}
-          </p>
-        )}
+      {/* Mobile card */}
+      <div className="lg:hidden flex flex-col gap-2 px-2 py-3 border-b border-gray-100 hover:bg-gray-50/50 transition-colors">
+        <div className="flex items-start gap-2.5">
+          <span className="text-xs text-gray-400 pt-1.5 tabular-nums w-4 shrink-0">{index}</span>
+          <div className="relative size-10 rounded-md bg-gray-100 overflow-hidden shrink-0">
+            {product.productImageUrl?.[0]?.url ? (
+              <Image src={product.productImageUrl[0].url} alt={product.title} fill className="object-cover" sizes="40px" />
+            ) : (
+              <div className="size-full flex items-center justify-center"><Package className="size-4 text-gray-300" /></div>
+            )}
+          </div>
+          <p className="text-sm text-gray-900 line-clamp-2 leading-tight flex-1 min-w-0">{product.title}</p>
+          <div className="flex items-center gap-1 shrink-0">
+            <button onClick={onClone} aria-label="Nusxa" className="size-9 rounded-md hover:bg-gray-100 flex items-center justify-center text-gray-400 active:scale-95 transition">
+              <Copy className="size-4" />
+            </button>
+            <button onClick={onRemove} aria-label="Qatorni o'chirish" className="size-9 rounded-full border-2 border-red-300 hover:bg-red-50 hover:border-red-500 flex items-center justify-center text-red-500 active:scale-95 transition">
+              <Minus className="size-4" />
+            </button>
+          </div>
+        </div>
+        <div className="flex items-end gap-2 pl-7">
+          <div className="flex-1 min-w-0">
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              placeholder="Miqdor"
+              value={qty === null ? "" : String(qty)}
+              onChange={(e) => onSetQty(e.target.value.replace(/[^0-9]/g, ""))}
+              onFocus={(e) => e.target.select()}
+              className={`w-full h-10 px-3 rounded-md text-base font-medium outline-none tabular-nums transition ${
+                isInvalid
+                  ? "border border-red-300 bg-red-50/50 text-red-700 focus:border-red-400 focus:ring-2 focus:ring-red-100 placeholder:text-red-400"
+                  : "border border-gray-300 bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              }`}
+            />
+            {isInvalid && (
+              <p className="mt-1 text-[10px] text-red-500 leading-tight">0 dan katta qiymat kiriting</p>
+            )}
+            {!isInvalid && stockOver && (
+              <p className="mt-1 text-[10px] text-amber-600 leading-tight">Omborda atigi {stockNum} dona</p>
+            )}
+          </div>
+          <div className="text-right shrink-0">
+            <p className="text-[10px] uppercase tracking-wide text-gray-400">Narx</p>
+            <p className="text-sm text-gray-900 tabular-nums">${formatNumber(Number(product.price))}</p>
+          </div>
+          <div className="text-right shrink-0 min-w-[70px]">
+            <p className="text-[10px] uppercase tracking-wide text-gray-400">Jami</p>
+            <p className={`text-sm tabular-nums font-bold ${isInvalid ? "text-gray-400" : "text-gray-900"}`}>
+              {isInvalid ? "$0" : `$${formatNumber(netLine)}`}
+            </p>
+            {lineDiscAmt > 0 && (
+              <p className="text-[10px] text-amber-600 tabular-nums">−${formatNumber(lineDiscAmt)}</p>
+            )}
+          </div>
+        </div>
         {line.note && (
-          <p className="text-[10px] text-blue-500 truncate max-w-[80px] ml-auto" title={line.note}>
-            📝 {line.note.slice(0, 16)}{line.note.length > 16 ? "…" : ""}
+          <p className="text-[11px] text-blue-500 pl-7 truncate" title={line.note}>
+            📝 {line.note}
           </p>
         )}
       </div>
-
-      {/* Actions */}
-      <div className="flex items-center gap-1 pt-1.5 justify-end">
-        <button
-          onClick={onClone}
-          title="Nusxa"
-          aria-label="Nusxa"
-          className="size-8 rounded-md hover:bg-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-700 active:scale-95 transition"
-        >
-          <Copy className="size-3.5" />
-        </button>
-        <button
-          onClick={onRemove}
-          title="O'chirish"
-          aria-label="Qatorni o'chirish"
-          className="size-8 rounded-full border-2 border-red-300 hover:bg-red-50 hover:border-red-500 flex items-center justify-center text-red-500 active:scale-95 transition"
-        >
-          <Minus className="size-3.5" />
-        </button>
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -1713,9 +1770,9 @@ function printCartPreview(opts: {
       <tbody>${rows}</tbody>
     </table>
     <div class="totals">
-      <div class="row"><span>Oraliq summa:</span><span>${fmt(opts.subtotal)} so'm</span></div>
-      ${opts.discountAmount > 0 ? `<div class="row" style="color:#c2410c"><span>Chegirma:</span><span>−${fmt(opts.discountAmount)} so'm</span></div>` : ""}
-      <div class="row grand"><span>JAMI:</span><span>${fmt(opts.total)} so'm</span></div>
+      <div class="row"><span>Oraliq summa:</span><span>$${fmt(opts.subtotal)}</span></div>
+      ${opts.discountAmount > 0 ? `<div class="row" style="color:#c2410c"><span>Chegirma:</span><span>−$${fmt(opts.discountAmount)}</span></div>` : ""}
+      <div class="row grand"><span>JAMI:</span><span>$${fmt(opts.total)}</span></div>
     </div>
     <div class="footer">Rahmat! · MegaHome Ulgurji</div>
     <script>window.onload=function(){setTimeout(function(){window.print();},250);};</script>

@@ -31,7 +31,8 @@ export default function FixedCartButton() {
   return (
     <Button
       onClick={handleNavigate}
-      className="fixed bottom-6 right-6 cursor-pointer size-16 z-50 bg-black shadow-lg rounded-full p-4 flex items-center justify-center transition-colors"
+      style={{ bottom: 'max(1.5rem, calc(env(safe-area-inset-bottom) + 0.75rem))' }}
+      className="fixed right-6 cursor-pointer size-16 z-50 bg-black shadow-lg rounded-full p-4 flex items-center justify-center transition-colors"
       aria-label="Savatcha"
       variant={"default"}
     >
