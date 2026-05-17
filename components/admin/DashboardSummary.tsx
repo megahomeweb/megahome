@@ -14,7 +14,7 @@ import toast from "react-hot-toast";
 
 const DashboardSummary = () => {
   const { notifications } = useNotificationStore();
-  const { products, fetchProducts } = useProductStore();
+  const { products, loading: productsLoading, fetchProducts } = useProductStore();
   const { orders, fetchAllOrders } = useOrderStore();
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
@@ -67,6 +67,18 @@ const DashboardSummary = () => {
     [products]
   );
 
+  // "Catalog empty but historical orders still exist" — surfaces when
+  // the operator has deleted (or never created) products yet the
+  // dashboard still shows revenue from past order basketItems (which
+  // are snapshots, so they survive the catalog being wiped). Without
+  // this banner the operator sees a non-zero Daromad/Sof foyda and
+  // mistakes it for a bug. The fix is: run Profil → Toʻliq factory
+  // reset, OR add products back.
+  const ghostRevenue =
+    !productsLoading
+    && totalProducts === 0
+    && (orders.length > 0 || totalRevenue > 0);
+
   // Profit-bias warning: products that have been sold without a
   // costPrice silently inflate profit (cost defaults to 0). Surface the
   // count so the admin knows their margin is biased upward.
@@ -86,6 +98,27 @@ const DashboardSummary = () => {
 
   return (
     <>
+      {/* "Catalog empty but old orders still show as revenue" banner.
+          See ghostRevenue calculation above for why this matters. Routes
+          the operator straight to the factory-reset section in profile. */}
+      {ghostRevenue && (
+        <div className="mx-3 sm:mx-0 mb-3 sm:mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 sm:px-4 sm:py-3 flex items-start gap-2.5">
+          <Info className="size-4 sm:size-5 text-red-600 shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs sm:text-sm font-semibold text-red-900">
+              Mahsulot katalogi bo&apos;sh, lekin sotuv tarixi ko&apos;rinmoqda
+            </p>
+            <p className="text-[11px] sm:text-xs text-red-800 mt-0.5 leading-snug">
+              Daromad va sof foyda eski buyurtmalardan hisoblanyapti.
+              Hisobotlarni 0 ga tushirish uchun{" "}
+              <Link href="/admin/profile" className="underline font-semibold whitespace-nowrap">
+                Profil → To&apos;liq factory reset →
+              </Link>
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Profit-bias warning banner — shown only when sold products lack a
           costPrice. Without this, the dashboard's "Sof foyda" silently
           treats those items as free-to-acquire, overstating profit. */}
@@ -165,10 +198,21 @@ const DashboardSummary = () => {
             <div className="flex items-start justify-between gap-1 sm:gap-2">
               <div className="min-w-0">
                 <p className="text-[11px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Mahsulotlar</p>
-                <p className="text-lg sm:text-3xl font-bold text-gray-900 mt-0.5 sm:mt-1 tabular-nums">{totalProducts}</p>
-                {lowStockCount > 0 && (
-                  <p className="text-[11px] sm:text-xs text-red-500 font-semibold mt-0.5 sm:mt-1 truncate">{lowStockCount} ta kam</p>
+                {/* Loading state must be visually distinct from
+                    "genuinely empty" (count = 0). Without this, the card
+                    reads identically whether the products listener is
+                    still in flight or there really are zero products in
+                    Firestore — operator can't tell which. */}
+                {productsLoading && totalProducts === 0 ? (
+                  <p className="h-7 sm:h-9 w-12 sm:w-16 mt-0.5 sm:mt-1 rounded bg-gray-200 animate-pulse" aria-label="Yuklanmoqda" />
+                ) : (
+                  <p className="text-lg sm:text-3xl font-bold text-gray-900 mt-0.5 sm:mt-1 tabular-nums">{totalProducts}</p>
                 )}
+                {totalProducts === 0 && !productsLoading ? (
+                  <p className="text-[11px] sm:text-xs text-purple-600 font-semibold mt-0.5 sm:mt-1 truncate">Mahsulot qo&apos;shing</p>
+                ) : lowStockCount > 0 ? (
+                  <p className="text-[11px] sm:text-xs text-red-500 font-semibold mt-0.5 sm:mt-1 truncate">{lowStockCount} ta kam</p>
+                ) : null}
               </div>
               <div className="flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl bg-purple-100 shrink-0">
                 <Package className="size-3.5 sm:size-5 text-purple-600" />
@@ -311,11 +355,23 @@ const DashboardSummary = () => {
             <div className="flex items-start justify-between gap-1 sm:gap-2">
               <div className="min-w-0">
                 <p className="text-[11px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Kam qolgan</p>
-                <p className={`text-lg sm:text-3xl font-bold mt-0.5 sm:mt-1 tabular-nums ${lowStockCount > 0 ? "text-red-600" : "text-green-600"}`}>
-                  {lowStockCount}
-                </p>
+                {/* When the catalog is empty, "Hammasi yetarli" (all
+                    sufficient) is misleading — there are zero products
+                    to evaluate. Show "Mahsulot yo'q" so the operator
+                    knows the green check isn't a real all-clear. */}
+                {productsLoading && totalProducts === 0 ? (
+                  <p className="h-7 sm:h-9 w-10 sm:w-14 mt-0.5 sm:mt-1 rounded bg-gray-200 animate-pulse" aria-label="Yuklanmoqda" />
+                ) : (
+                  <p className={`text-lg sm:text-3xl font-bold mt-0.5 sm:mt-1 tabular-nums ${lowStockCount > 0 ? "text-red-600" : totalProducts === 0 ? "text-gray-400" : "text-green-600"}`}>
+                    {lowStockCount}
+                  </p>
+                )}
                 <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">
-                  {lowStockCount > 0 ? "5 tadan kam" : "Hammasi yetarli"}
+                  {lowStockCount > 0
+                    ? "5 tadan kam"
+                    : totalProducts === 0 && !productsLoading
+                      ? "Mahsulot yo'q"
+                      : "Hammasi yetarli"}
                 </p>
                 {lowStockCount > 0 && (
                   <button

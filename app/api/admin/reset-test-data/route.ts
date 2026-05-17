@@ -7,30 +7,32 @@ import { isAdminEmail } from '@/lib/admin-config';
  * demo the POS to a shop as if it were freshly deployed: reports/charts
  * read zero, ombor history is clean, no leftover nasiya balances.
  *
- * SURVIVES the reset:
- *   - `categories`   (catalog masters)
- *   - `products`     (catalog — but `stock` field is zeroed)
- *   - `user`         (every account, including admin)
- *   - `telegramUsers`, `promoCodes`  (left untouched per owner directive)
+ * Two modes:
+ *   - "safe" (default): clears transactional data; preserves catalog
+ *     (products + categories) — only zeros products.stock so kirim flow
+ *     can be tested from an empty-shelf state.
+ *   - "factory": also wipes products + categories. For the "I deleted
+ *     my catalog by accident and the dashboard still shows old revenue
+ *     from snapshot basketItems — give me a TRUE zero state" case.
  *
- * GETS CLEARED:
- *   - `orders`               (sales / web / admin / telegram)
- *   - `nasiya`               (credit ledger)
- *   - `stockMovements`       (ombor audit trail)
- *   - `stockReceipts`        (kirim history)
- *   - `idempotencyKeys`      (order-create dedup state)
- *   - `telegramPendingRefs`  (Telegram checkout transient state)
- *
- * PRODUCTS: every product's `stock` is set to 0 so the kirim flow can be
- * tested from a true empty-shelf state. costPrice is left intact — owner
- * can edit per product if they want, and there's no reporting impact when
- * no sales exist.
+ * SURVIVES even a factory reset:
+ *   - `user` (every account, including admin) — owner explicitly asked
+ *     to preserve customer logins
+ *   - `telegramUsers`, `promoCodes` — owner-directive ("don't mind
+ *     telegram for now")
  *
  * Auth: Firebase ID token in `Authorization: Bearer …`, gated on the
  * verified email claim matching the hardcoded admin email. Body must
- * include `confirm: "RESET"` so a random POST to this endpoint (e.g.
- * from a misconfigured script) cannot accidentally wipe a live shop.
+ * include `confirm: "RESET"` (case-sensitive) so a random POST to this
+ * endpoint cannot accidentally wipe a live shop. Factory mode also
+ * requires `mode: "factory"` explicitly — never default to it.
+ *
+ * Vercel maxDuration is set to 60s; the hobby tier default is 10s
+ * which is too short if there are thousands of stockMovements rows
+ * accumulated from past testing.
  */
+
+export const maxDuration = 60;
 
 async function verifyAdmin(req: NextRequest): Promise<boolean> {
   const authHeader = req.headers.get('Authorization');
@@ -45,7 +47,8 @@ async function verifyAdmin(req: NextRequest): Promise<boolean> {
   }
 }
 
-const COLLECTIONS_TO_CLEAR = [
+// Transactional collections — always cleared.
+const SAFE_COLLECTIONS = [
   'orders',
   'nasiya',
   'stockMovements',
@@ -54,22 +57,20 @@ const COLLECTIONS_TO_CLEAR = [
   'telegramPendingRefs',
 ] as const;
 
+// Catalog collections — only cleared in factory mode.
+const FACTORY_EXTRA_COLLECTIONS = ['products', 'categories'] as const;
+
 /**
  * Batch-delete every document in a collection. Firestore caps a single
- * batch at 500 ops, so we page through in chunks. BulkWriter would be
- * fewer lines but it doesn't return per-collection counts cleanly, and
- * the operator wants to see exactly how many docs were wiped per
- * collection to verify the reset worked.
+ * batch at 500 ops, so we page through in chunks. Returns the count so
+ * the operator can verify per-collection what was wiped.
  */
 async function clearCollection(
   db: FirebaseFirestore.Firestore,
   collectionPath: string,
 ): Promise<number> {
   let totalDeleted = 0;
-  const PAGE = 400; // stay safely under the 500-op batch limit
-  // Loop because a single .get() can return tens of thousands of docs and
-  // batches must be <= 500 ops. Each iteration: page the next 400 doc
-  // refs (id-only) and commit them in one batch.
+  const PAGE = 400;
   while (true) {
     const snap = await db.collection(collectionPath).limit(PAGE).get();
     if (snap.empty) break;
@@ -77,17 +78,18 @@ async function clearCollection(
     snap.docs.forEach((d) => batch.delete(d.ref));
     await batch.commit();
     totalDeleted += snap.size;
-    // If the page was smaller than the limit, we've drained the collection.
     if (snap.size < PAGE) break;
   }
   return totalDeleted;
 }
 
 /**
- * Set every product's stock to 0. Paged for the same reason as
- * clearCollection — a catalog of thousands of SKUs can't be updated in
- * one batch. We touch only the `stock` field so the catalog (title,
- * price, costPrice, images, category) is preserved exactly as-is.
+ * Set every product's stock to 0. Touches only the `stock` field so
+ * everything else (title, price, costPrice, images, category) survives
+ * exactly as it was — the catalog is preserved, only inventory is reset.
+ *
+ * Returns the count, OR 0 if there are no products to update (factory
+ * mode will have already deleted them before calling this).
  */
 async function zeroProductStock(
   db: FirebaseFirestore.Firestore,
@@ -114,7 +116,6 @@ async function zeroProductStock(
 }
 
 export async function POST(req: NextRequest) {
-  // 1. Auth gate
   const ok = await verifyAdmin(req);
   if (!ok) {
     return NextResponse.json(
@@ -123,12 +124,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 2. Confirmation phrase — defeats accidental triggers from a stray fetch
-  let body: { confirm?: string } = {};
+  let body: { confirm?: string; mode?: 'safe' | 'factory' } = {};
   try {
     body = await req.json();
   } catch {
-    // empty body is fine to surface a clearer error below
+    // Empty body falls through to the validation error below.
   }
   if (body.confirm !== 'RESET') {
     return NextResponse.json(
@@ -136,38 +136,59 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
+  // Factory mode must be opt-in by explicit string match. Anything else
+  // (undefined, "safe", typo) routes to the safe path. Defense against
+  // a client sending `mode: true` and wiping the catalog by accident.
+  const mode: 'safe' | 'factory' = body.mode === 'factory' ? 'factory' : 'safe';
 
-  // 3. Execute reset
   try {
     const adminApp = getAdminApp();
     const db = adminApp.firestore();
     const startedAt = Date.now();
+    console.log(`[reset] starting mode=${mode}`);
 
     const cleared: Record<string, number> = {};
-    // Sequential — if one collection throws partway, the operator gets a
-    // partial report and can re-run. Parallel would hide which step failed.
-    for (const name of COLLECTIONS_TO_CLEAR) {
+    const collectionsToClear: readonly string[] =
+      mode === 'factory'
+        ? [...SAFE_COLLECTIONS, ...FACTORY_EXTRA_COLLECTIONS]
+        : SAFE_COLLECTIONS;
+
+    // Sequential — if one step throws we want to know which collection
+    // failed so the operator can retry only that one if needed.
+    for (const name of collectionsToClear) {
       try {
+        const t0 = Date.now();
         cleared[name] = await clearCollection(db, name);
+        console.log(`[reset] cleared ${name}: ${cleared[name]} docs in ${Date.now() - t0}ms`);
       } catch (err) {
         console.error(`[reset] failed clearing ${name}:`, err);
-        cleared[name] = -1; // sentinel — UI shows "xato" for this row
+        cleared[name] = -1;
       }
     }
 
+    // Stock zeroing only runs in safe mode — in factory mode the
+    // products collection no longer exists, so there's nothing to update.
     let productsZeroed = 0;
-    try {
-      productsZeroed = await zeroProductStock(db);
-    } catch (err) {
-      console.error('[reset] failed zeroing product stock:', err);
-      productsZeroed = -1;
+    if (mode === 'safe') {
+      try {
+        const t0 = Date.now();
+        productsZeroed = await zeroProductStock(db);
+        console.log(`[reset] zeroed stock on ${productsZeroed} products in ${Date.now() - t0}ms`);
+      } catch (err) {
+        console.error('[reset] failed zeroing product stock:', err);
+        productsZeroed = -1;
+      }
     }
+
+    const durationMs = Date.now() - startedAt;
+    console.log(`[reset] complete mode=${mode} in ${durationMs}ms`);
 
     return NextResponse.json({
       success: true,
+      mode,
       cleared,
       productsZeroed,
-      durationMs: Date.now() - startedAt,
+      durationMs,
     });
   } catch (error) {
     console.error('[reset] fatal:', error);
