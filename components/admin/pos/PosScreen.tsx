@@ -2364,6 +2364,8 @@ function CheklarModal({
             <label className="text-xs text-gray-600 ml-1">Go to</label>
             <input
               type="number"
+              inputMode="numeric"
+              pattern="[0-9]*"
               min={1}
               max={totalPages}
               value={safePage}

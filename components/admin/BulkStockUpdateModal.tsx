@@ -90,7 +90,7 @@ export default function BulkStockUpdateModal({ selectedIds, onClose }: BulkStock
           </button>
         </div>
 
-        <input type="number" value={value} onChange={(e) => setValue(Number(e.target.value))} className="w-full px-4 py-3 border border-gray-200 rounded-xl text-center text-xl font-bold focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" placeholder={mode === "set" ? "Yangi ombor soni" : "+10 yoki -5"} />
+        <input type="number" inputMode="numeric" pattern="-?[0-9]*" value={value} onChange={(e) => setValue(Number(e.target.value))} className="w-full px-4 py-3 border border-gray-200 rounded-xl text-center text-xl font-bold focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" placeholder={mode === "set" ? "Yangi ombor soni" : "+10 yoki -5"} />
 
         <select value={reason} onChange={(e) => setReason(e.target.value)}
           className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none mt-3">

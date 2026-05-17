@@ -8,6 +8,7 @@ import { auth } from '../../../firebase/config';
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 'firebase/auth';
 import { updateDoc, doc } from 'firebase/firestore';
 import { fireDB } from '../../../firebase/config';
+import ResetTestDataPanel from '../../../components/admin/ResetTestDataPanel';
 
 const AdminProfilePage = () => {
   const { userData, setUserData } = useAuthStore();
@@ -168,9 +169,11 @@ const AdminProfilePage = () => {
           <label className="block mb-1 font-medium">Telefon raqami</label>
           <input
             name="phone"
-            type="text"
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
             placeholder="+998 (__) ___-__-__"
-            className={`form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-xl text-brand-black-text focus:outline-0 focus:ring-0 border-none bg-[#e7edf3] focus:border-none !h-10 placeholder:text-[#4e7397] p-4 text-base font-normal leading-normal ${phoneError ? 'border-red-500 border-2' : ''}`}
+            className={`form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-xl text-brand-black-text focus:outline-0 focus:ring-0 border-none bg-[#e7edf3] focus:border-none !h-12 placeholder:text-[#4e7397] p-4 text-base font-normal leading-normal ${phoneError ? 'border-red-500 border-2' : ''}`}
             value={phoneNumber}
             onChange={handlePhoneNumberChange}
             maxLength={20}
@@ -213,6 +216,8 @@ const AdminProfilePage = () => {
           {loading ? 'Saqlanmoqda...' : 'Saqlash'}
         </Button>
       </form>
+
+      <ResetTestDataPanel />
     </div>
   );
 };

@@ -168,6 +168,8 @@ const KirimPage = () => {
                         <input
                           type="number"
                           min="1"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
                           className="w-full text-center rounded-lg bg-gray-100 h-8 text-sm focus:outline-none"
                           value={item.quantity}
                           onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value) || 0)}
@@ -177,6 +179,8 @@ const KirimPage = () => {
                         <input
                           type="number"
                           min="0"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
                           className="w-full text-center rounded-lg bg-gray-100 h-8 text-sm focus:outline-none"
                           value={item.unitCost}
                           onChange={(e) => updateItem(index, 'unitCost', parseInt(e.target.value) || 0)}
@@ -216,7 +220,9 @@ const KirimPage = () => {
                       <input
                         type="number"
                         min="1"
-                        className="w-full text-center rounded-lg bg-gray-100 h-9 text-sm focus:outline-none"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        className="w-full text-center rounded-lg bg-gray-100 h-11 text-base focus:outline-none"
                         value={item.quantity}
                         onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value) || 0)}
                       />
@@ -226,7 +232,9 @@ const KirimPage = () => {
                       <input
                         type="number"
                         min="0"
-                        className="w-full text-center rounded-lg bg-gray-100 h-9 text-sm focus:outline-none"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        className="w-full text-center rounded-lg bg-gray-100 h-11 text-base focus:outline-none"
                         value={item.unitCost}
                         onChange={(e) => updateItem(index, 'unitCost', parseInt(e.target.value) || 0)}
                       />

@@ -25,11 +25,20 @@ interface AuthState {
   isAuthenticated: boolean
   isLoading: boolean
   isfetchLoading: boolean
+  /**
+   * Live onSnapshot handle from the most recent fetchAllUsers() call.
+   * Tracked here so logout() can guarantee the listener is torn down
+   * even if a mounted component never reached its own cleanup (e.g.
+   * the logout redirect unmounts the consumer mid-flight). Callers
+   * still capture and dispose their own returned unsub for normal
+   * unmount — this is belt-and-suspenders.
+   */
+  _unsubAllUsers: (() => void) | null
   setUser: (user: FirebaseUser | null) => void
   setUserData: (userData: UserData | null) => void
   setLoading: (loading: boolean) => void
   fetchUserData: (uid: string) => Promise<void>
-  fetchAllUsers: () => void
+  fetchAllUsers: () => (() => void) | undefined
   logout: () => void
   isAdmin: () => boolean
   isManager: () => boolean
@@ -45,6 +54,7 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
       isLoading: true,
       isfetchLoading: true,
+      _unsubAllUsers: null,
 
       setUser: (user) => {
         // Do NOT touch isLoading here. AuthProvider drives the loading
@@ -93,12 +103,16 @@ export const useAuthStore = create<AuthState>()(
         try {
           const q = collection(fireDB, "user");
           const unsubscribe = onSnapshot(q, (QuerySnapshot) => {
-            let usersArray: any = [];
+            const usersArray: UserData[] = [];
             QuerySnapshot.forEach((doc) => {
-              usersArray.push({ ...doc.data(), uid: doc.id });
+              usersArray.push({ ...(doc.data() as UserData), uid: doc.id });
             });
             set({ users: usersArray, isfetchLoading: false });
           });
+          // Track the most-recent handle on the store so logout() can
+          // tear down even if the consumer component never disposes it.
+          // Firestore's unsubscribe is idempotent — double-call is safe.
+          set({ _unsubAllUsers: unsubscribe });
           return unsubscribe;
         } catch (error) {
           console.error('Error fetching users:', error);
@@ -128,6 +142,13 @@ export const useAuthStore = create<AuthState>()(
             (useNotificationStore.getState() as { stopListening?: () => void }).stopListening?.();
           } catch {}
         }
+        // Tear down the all-users listener too (separate code path from
+        // the lazy-imported stores above because authStore already owns
+        // this listener — no need for a dynamic import).
+        const unsubUsers = get()._unsubAllUsers;
+        if (unsubUsers) {
+          try { unsubUsers(); } catch {}
+        }
         try {
           await signOut(auth);
         } catch (error) {
@@ -138,11 +159,38 @@ export const useAuthStore = create<AuthState>()(
         set({
           user: null,
           userData: null,
+          users: [],
+          _unsubAllUsers: null,
           isAuthenticated: false,
           isLoading: false
         });
+        // Wipe every persisted client cache so the next user on the
+        // same device (think: shared POS tablet at a market stall)
+        // can't see the previous operator's cart, drafts, unread
+        // notifications, or wishlist. Privacy bug if these leak.
+        // Lazy-imported for the same circular-import reason as above.
         if (typeof window !== 'undefined') {
           useAuthStore.persist.clearStorage();
+          try {
+            const useCartProductStore = (await import('@/store/useCartStore')).default as
+              { persist?: { clearStorage?: () => void } };
+            useCartProductStore.persist?.clearStorage?.();
+          } catch {}
+          try {
+            const useDraftStore = (await import('@/store/useDraftStore')).default as
+              { persist?: { clearStorage?: () => void } };
+            useDraftStore.persist?.clearStorage?.();
+          } catch {}
+          try {
+            const { useNotificationStore } = await import('@/store/useNotificationStore');
+            (useNotificationStore as unknown as { persist?: { clearStorage?: () => void } })
+              .persist?.clearStorage?.();
+          } catch {}
+          try {
+            const useWishlistStore = (await import('@/store/useWishlistStore')).default as
+              { persist?: { clearStorage?: () => void } };
+            useWishlistStore.persist?.clearStorage?.();
+          } catch {}
         }
       },
 

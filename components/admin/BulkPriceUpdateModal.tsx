@@ -57,7 +57,9 @@ const BulkPriceUpdateModal = ({ productIds, onClose }: Props) => {
           <div className="flex items-center gap-2">
             <input
               type="number"
-              className="flex-1 rounded-xl bg-[#e7edf3] px-4 h-10 text-sm focus:outline-none"
+              inputMode="decimal"
+              pattern="-?[0-9]*\.?[0-9]*"
+              className="flex-1 rounded-xl bg-[#e7edf3] px-4 h-11 text-base focus:outline-none"
               value={percent || ''}
               onChange={(e) => setPercent(parseFloat(e.target.value) || 0)}
               placeholder="Masalan: 10 yoki -5"
