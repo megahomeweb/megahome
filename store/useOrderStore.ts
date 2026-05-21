@@ -30,7 +30,12 @@ const ORDERS_LIST_DEFAULT_CAP = 2000;
  */
 
 export interface CreateOrderInput {
-  items: { productId: string; quantity: number }[];
+  /** Each item is an independent cart line.
+   *  `unitPriceOverride` (POS only) lets an admin sell at a price that
+   *  differs from the catalog price for this sale only. Server gates
+   *  the override on the caller being admin; non-admin clients sending
+   *  it get 403. */
+  items: { productId: string; quantity: number; unitPriceOverride?: number }[];
   clientName: string;
   clientPhone: string;
   deliveryAddress?: string;

@@ -25,6 +25,16 @@ import { isAdminEmail } from '@/lib/admin-config';
 interface CartItemInput {
   productId: string;
   quantity: number;
+  /**
+   * Per-line selling-price override in UZS (integer). Used by the POS so
+   * a cashier can negotiate the sale price without touching the product's
+   * catalog price. Server gates this on the caller being admin — a
+   * non-admin client sending this gets 403, preventing a malicious user
+   * from paying 1 UZS for any item. Two POS rows for the same product
+   * with different overrides remain SEPARATE basket entries (one line
+   * per (productId, price) pair); same-price rows still merge.
+   */
+  unitPriceOverride?: number;
 }
 
 type PaymentEntryMethod = 'naqd' | 'nasiya' | 'karta';
@@ -64,6 +74,9 @@ interface RequestBody {
 interface OrderBasketItem {
   id: string;
   title: string;
+  /** Effective unit price actually charged for this line (catalog OR
+   *  override). Existing consumers (reports, invoice, dashboard) read
+   *  this as the line's price, so the override flows through naturally. */
   price: string;
   costPrice?: number;
   category: string;
@@ -72,6 +85,9 @@ interface OrderBasketItem {
   productImageUrl: { url: string; path: string }[];
   storageFileId?: string;
   quantity: number;
+  /** Audit-only fields, present when an admin overrode the price at POS. */
+  priceOverridden?: boolean;
+  catalogPrice?: number;
 }
 
 export async function POST(req: NextRequest) {
@@ -269,8 +285,20 @@ export async function POST(req: NextRequest) {
       promoCodeRefId = snap.docs[0].id;
     }
 
-    // Normalize and dedupe items (sum quantities for same productId)
-    const merged = new Map<string, number>();
+    // Normalize and dedupe items. Two rows with the same productId AND
+    // the same selling price merge (sum quantities). Two rows with the
+    // same productId but DIFFERENT override prices stay as separate
+    // basket entries — that's the whole point of letting a cashier sell
+    // the same item at two prices in one ticket.
+    //
+    // Stock still has to be checked against the SUM across all rows for
+    // a productId (done later, after we've collected everything), so the
+    // override branch can't sneak past stock limits.
+    const linesByKey = new Map<
+      string,
+      { productId: string; quantity: number; unitPriceOverride?: number }
+    >();
+    const UNIT_PRICE_MAX = 1_000_000_000; // 1 billion UZS — plenty of headroom
     for (const it of items) {
       if (typeof it?.productId !== 'string' || !it.productId) {
         return NextResponse.json({ error: 'Invalid productId' }, { status: 400 });
@@ -279,9 +307,47 @@ export async function POST(req: NextRequest) {
       if (!Number.isFinite(qty) || qty <= 0 || qty > 100_000) {
         return NextResponse.json({ error: `Invalid quantity for ${it.productId}` }, { status: 400 });
       }
-      merged.set(it.productId, (merged.get(it.productId) ?? 0) + Math.floor(qty));
+      let override: number | undefined;
+      if (it.unitPriceOverride !== undefined && it.unitPriceOverride !== null) {
+        if (!callerIsAdmin) {
+          // Non-admin clients can't tamper with prices. This is the
+          // moral equivalent of the original "trust server-side prices"
+          // contract — admins extend it intentionally for POS sales.
+          return NextResponse.json(
+            { error: 'unitPriceOverride is admin-only' },
+            { status: 403 },
+          );
+        }
+        const n = Number(it.unitPriceOverride);
+        if (!Number.isFinite(n) || n <= 0 || n > UNIT_PRICE_MAX) {
+          return NextResponse.json(
+            { error: `Invalid unitPriceOverride for ${it.productId}` },
+            { status: 400 },
+          );
+        }
+        override = Math.floor(n);
+      }
+      const key = override !== undefined ? `${it.productId}#${override}` : it.productId;
+      const existing = linesByKey.get(key);
+      if (existing) {
+        existing.quantity += Math.floor(qty);
+      } else {
+        linesByKey.set(key, {
+          productId: it.productId,
+          quantity: Math.floor(qty),
+          ...(override !== undefined ? { unitPriceOverride: override } : {}),
+        });
+      }
     }
-    const normalizedItems = Array.from(merged.entries()).map(([productId, quantity]) => ({ productId, quantity }));
+    const normalizedLines = Array.from(linesByKey.values());
+
+    // Per-product total quantity (used for stock check + single decrement
+    // even when one product appears in multiple price-override variants).
+    const totalQtyByProduct = new Map<string, number>();
+    for (const ln of normalizedLines) {
+      totalQtyByProduct.set(ln.productId, (totalQtyByProduct.get(ln.productId) ?? 0) + ln.quantity);
+    }
+    const uniqueProductIds = Array.from(totalQtyByProduct.keys());
 
     // Ownership: customers can only create for themselves; admins may pass targetUserUid
     let orderUserUid = callerUid;
@@ -311,13 +377,23 @@ export async function POST(req: NextRequest) {
     let txResult: TxResult & { nasiyaIds: string[] };
     try {
       txResult = await db.runTransaction(async (tx) => {
-        // READS FIRST (Firestore transaction requirement)
-        const productRefs = normalizedItems.map((i) => db.collection('products').doc(i.productId));
+        // READS FIRST (Firestore transaction requirement). One read per
+        // UNIQUE productId even when the cart has multiple price-override
+        // variants of the same product — otherwise a single override row
+        // would slip past the stock check that compares against summed qty.
+        const productRefs = uniqueProductIds.map((id) => db.collection('products').doc(id));
         const productSnaps = await Promise.all(productRefs.map((r) => tx.get(r)));
         // Read promo code doc inside the transaction so cap checks
         // (totalUsed, usedBy[uid]) are atomic with the redemption write.
         const promoRef = promoCodeRefId ? db.collection('promoCodes').doc(promoCodeRefId) : null;
         const promoSnap = promoRef ? await tx.get(promoRef) : null;
+
+        const productDataById = new Map<string, FirebaseFirestore.DocumentData>();
+        for (let i = 0; i < productSnaps.length; i++) {
+          if (productSnaps[i].exists) {
+            productDataById.set(uniqueProductIds[i], productSnaps[i].data() ?? {});
+          }
+        }
 
         const stockErrors: Array<{ productId: string; title?: string; available: number; requested: number }> = [];
         const basketItems: OrderBasketItem[] = [];
@@ -326,25 +402,56 @@ export async function POST(req: NextRequest) {
         let totalQuantity = 0;
         const nasiyaIds: string[] = [];
 
-        for (let i = 0; i < productSnaps.length; i++) {
-          const snap = productSnaps[i];
-          const { productId, quantity } = normalizedItems[i];
-
-          if (!snap.exists) {
-            stockErrors.push({ productId, available: 0, requested: quantity });
+        // Stock check: compare summed-per-productId against current stock.
+        for (let i = 0; i < uniqueProductIds.length; i++) {
+          const productId = uniqueProductIds[i];
+          const requested = totalQtyByProduct.get(productId) ?? 0;
+          const data = productDataById.get(productId);
+          if (!data) {
+            stockErrors.push({ productId, available: 0, requested });
             continue;
           }
-          const data = snap.data() ?? {};
           const available = typeof data.stock === 'number' ? data.stock : 0;
-          if (available < quantity) {
-            stockErrors.push({ productId, title: data.title, available, requested: quantity });
-            continue;
+          if (available < requested) {
+            stockErrors.push({
+              productId,
+              title: String(data.title ?? ''),
+              available,
+              requested,
+            });
           }
+        }
 
-          const priceNum = Number(data.price);
-          const linePrice = (Number.isFinite(priceNum) ? priceNum : 0) * quantity;
+        if (stockErrors.length > 0) {
+          // Abort transaction by throwing; caught below.
+          const err = new Error('Stock unavailable');
+          (err as Error & { stockErrors?: typeof stockErrors }).stockErrors = stockErrors;
+          throw err;
+        }
+
+        // Build one basket entry per normalized line (i.e. per
+        // (productId, price) pair). The override IS the line's effective
+        // price — the catalog price is preserved separately on the basket
+        // item for audit. Existing consumers that read `item.price`
+        // continue to see what was actually charged.
+        for (const ln of normalizedLines) {
+          const data = productDataById.get(ln.productId);
+          if (!data) continue; // already in stockErrors → unreachable here
+          const catalogPriceNum = Number(data.price);
+          const catalogPriceSafe = Number.isFinite(catalogPriceNum) ? catalogPriceNum : 0;
+          // Drop a redundant override that matches catalog exactly so the
+          // audit fields don't flag a non-event.
+          const hasRealOverride =
+            typeof ln.unitPriceOverride === 'number' &&
+            ln.unitPriceOverride > 0 &&
+            ln.unitPriceOverride !== catalogPriceSafe;
+          const effectivePrice = hasRealOverride
+            ? (ln.unitPriceOverride as number)
+            : catalogPriceSafe;
+
+          const linePrice = effectivePrice * ln.quantity;
           totalPrice += linePrice;
-          totalQuantity += quantity;
+          totalQuantity += ln.quantity;
 
           // Build the snapshot with conditional spread so optional
           // fields are OMITTED when missing — never `undefined`. This
@@ -353,32 +460,38 @@ export async function POST(req: NextRequest) {
           // the "Order creation failed" 500; both together make the
           // failure mode impossible to regress accidentally.
           basketItems.push({
-            id: productId,
+            id: ln.productId,
             title: String(data.title ?? ''),
-            price: String(data.price ?? '0'),
+            price: String(effectivePrice),
             costPrice: typeof data.costPrice === 'number' ? data.costPrice : 0,
             category: String(data.category ?? ''),
             ...(data.subcategory ? { subcategory: String(data.subcategory) } : {}),
             ...(data.description ? { description: String(data.description) } : {}),
             productImageUrl: Array.isArray(data.productImageUrl) ? data.productImageUrl : [],
             ...(data.storageFileId ? { storageFileId: String(data.storageFileId) } : {}),
-            quantity,
-          });
-
-          movements.push({
-            productId,
-            productTitle: String(data.title ?? ''),
-            quantity,
-            stockBefore: available,
-            stockAfter: available - quantity,
+            quantity: ln.quantity,
+            ...(hasRealOverride
+              ? { priceOverridden: true, catalogPrice: catalogPriceSafe }
+              : {}),
           });
         }
 
-        if (stockErrors.length > 0) {
-          // Abort transaction by throwing; caught below.
-          const err = new Error('Stock unavailable');
-          (err as Error & { stockErrors?: typeof stockErrors }).stockErrors = stockErrors;
-          throw err;
+        // One stock-movement per unique productId (matches the single
+        // decrement we'll do below). Logs sum quantity across override
+        // variants so the audit trail stays one row per (order, product).
+        for (let i = 0; i < uniqueProductIds.length; i++) {
+          const productId = uniqueProductIds[i];
+          const data = productDataById.get(productId);
+          if (!data) continue;
+          const available = typeof data.stock === 'number' ? data.stock : 0;
+          const requested = totalQtyByProduct.get(productId) ?? 0;
+          movements.push({
+            productId,
+            productTitle: String(data.title ?? ''),
+            quantity: requested,
+            stockBefore: available,
+            stockAfter: available - requested,
+          });
         }
 
         // ── Validate + apply promo code ──

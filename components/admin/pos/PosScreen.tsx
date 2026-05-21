@@ -69,6 +69,18 @@ interface CartLine {
   lineDiscount: { type: "pct" | "abs"; value: number } | null;
   /** Per-line note (e.g. customer-specific spec) — max 256 chars */
   note: string | null;
+  /** Per-line selling-price override (UZS, integer). null = use catalog
+   *  product.price. Lets the cashier negotiate / sell at any price while
+   *  keeping the product's catalog price intact in Firestore. */
+  priceOverride: number | null;
+}
+
+/** Effective unit selling price for a cart line — override beats catalog. */
+function effectiveUnitPrice(line: CartLine): number {
+  if (typeof line.priceOverride === "number" && line.priceOverride > 0) {
+    return line.priceOverride;
+  }
+  return Number(line.product.price) || 0;
 }
 
 /** Cross-browser unique row id (crypto.randomUUID isn't on every target). */
@@ -281,9 +293,10 @@ export default function PosScreen() {
   }, [products]);
 
   // ── Cart math (bito-faithful: rows with null/0 qty contribute 0) ──
-  // Returns gross line total (qty * price) — before line discount.
+  // Returns gross line total (qty * effective price) — before line discount.
+  // Effective price = per-line override when set, otherwise catalog price.
   const lineGross = (l: CartLine) =>
-    l.qty && l.qty > 0 ? Number(l.product.price) * l.qty : 0;
+    l.qty && l.qty > 0 ? effectiveUnitPrice(l) * l.qty : 0;
   // Returns the absolute UZS amount discounted on this line.
   const lineDiscountAmount = (l: CartLine) => {
     if (!l.lineDiscount || !l.lineDiscount.value) return 0;
@@ -350,7 +363,18 @@ export default function PosScreen() {
       qty: number,
       lineDiscount: { type: "pct" | "abs"; value: number } | null,
       note: string | null,
+      priceOverride: number | null,
     ) => {
+      const catalogPrice = Number(product.price) || 0;
+      // Treat an override equal to catalog price as "no override" so the
+      // basket entry stays clean (cart row won't show the modified badge,
+      // server won't be asked to store an audit field needlessly).
+      const normalizedOverride =
+        typeof priceOverride === "number" &&
+        priceOverride > 0 &&
+        priceOverride !== catalogPrice
+          ? Math.floor(priceOverride)
+          : null;
       setCart((prev) => [
         ...prev,
         {
@@ -359,6 +383,7 @@ export default function PosScreen() {
           qty: qty > 0 ? Math.floor(qty) : null,
           lineDiscount: lineDiscount && lineDiscount.value > 0 ? lineDiscount : null,
           note: note?.trim() ? note.trim().slice(0, 256) : null,
+          priceOverride: normalizedOverride,
         },
       ]);
     },
@@ -379,13 +404,30 @@ export default function PosScreen() {
     );
   }, []);
 
+  // Per-line price override. Empty input or a value matching the catalog
+  // price clears the override (so the row falls back to product.price).
+  const setPrice = useCallback((rowId: string, raw: string) => {
+    setCart((prev) =>
+      prev.map((l) => {
+        if (l.rowId !== rowId) return l;
+        const catalogPrice = Number(l.product.price) || 0;
+        if (raw === "") return { ...l, priceOverride: null };
+        const n = parseInt(raw, 10);
+        if (Number.isNaN(n) || n < 0) return { ...l, priceOverride: null };
+        if (n === catalogPrice) return { ...l, priceOverride: null };
+        return { ...l, priceOverride: n };
+      }),
+    );
+  }, []);
+
   const cloneLine = useCallback((rowId: string) => {
     setCart((prev) => {
       const idx = prev.findIndex((l) => l.rowId === rowId);
       if (idx < 0) return prev;
       // Insert a duplicate row right after — same product, qty null,
-      // discount/note reset (clone is for fresh entry, not copy of all data).
-      // New row gets its own rowId so subsequent edits don't affect the source.
+      // discount/note/price reset (clone is for fresh entry, not copy
+      // of all data). New row gets its own rowId so subsequent edits
+      // don't affect the source.
       const next = [...prev];
       next.splice(idx + 1, 0, {
         rowId: newRowId(),
@@ -393,6 +435,7 @@ export default function PosScreen() {
         qty: null,
         lineDiscount: null,
         note: null,
+        priceOverride: null,
       });
       return next;
     });
@@ -472,7 +515,16 @@ export default function PosScreen() {
         const combinedNote = [responsibleNote, lineNotes].filter(Boolean).join("\n---\n") || undefined;
 
         const result = await createOrder({
-          items: validLines.map(({ product, qty }) => ({ productId: product.id, quantity: qty as number })),
+          items: validLines.map((l) => ({
+            productId: l.product.id,
+            quantity: l.qty as number,
+            // Only send the override when the cashier actually changed it.
+            // The server gates this on the caller being admin; non-admin
+            // clients can't tamper with prices via DevTools.
+            ...(typeof l.priceOverride === "number" && l.priceOverride > 0
+              ? { unitPriceOverride: l.priceOverride }
+              : {}),
+          })),
           clientName: customer?.name ?? "Mijoz",
           clientPhone: customer?.phone ?? "",
           targetUserUid: customer?.uid,
@@ -591,7 +643,7 @@ export default function PosScreen() {
                 items: valid.map((l) => ({
                   title: l.product.title,
                   qty: l.qty as number,
-                  price: Number(l.product.price),
+                  price: effectiveUnitPrice(l),
                   lineDiscount: lineDiscountAmount(l) || undefined,
                   note: l.note ?? undefined,
                 })),
@@ -879,6 +931,7 @@ export default function PosScreen() {
                     index={idx + 1}
                     line={line}
                     onSetQty={(raw) => setQty(line.rowId, raw)}
+                    onSetPrice={(raw) => setPrice(line.rowId, raw)}
                     onClone={() => cloneLine(line.rowId)}
                     onRemove={() => removeLine(line.rowId)}
                   />
@@ -986,8 +1039,8 @@ export default function PosScreen() {
       {pendingProduct && (
         <PosProductDetailModal
           product={pendingProduct}
-          onSave={(qty, lineDiscount, note) => {
-            commitProductLine(pendingProduct, qty, lineDiscount, note);
+          onSave={(qty, lineDiscount, note, priceOverride) => {
+            commitProductLine(pendingProduct, qty, lineDiscount, note, priceOverride);
             setPendingProduct(null);
             // Re-focus search for fast multi-add workflow
             setTimeout(() => productSearchRef.current?.focus(), 50);
@@ -1080,18 +1133,23 @@ function CartRow({
   index,
   line,
   onSetQty,
+  onSetPrice,
   onClone,
   onRemove,
 }: {
   index: number;
   line: CartLine;
   onSetQty: (raw: string) => void;
+  onSetPrice: (raw: string) => void;
   onClone: () => void;
   onRemove: () => void;
 }) {
   const { product, qty } = line;
   const isInvalid = qty === null || qty === 0;
-  const grossLine = qty && qty > 0 ? Number(product.price) * qty : 0;
+  const catalogPrice = Number(product.price) || 0;
+  const unitPrice = effectiveUnitPrice(line);
+  const priceChanged = unitPrice !== catalogPrice;
+  const grossLine = qty && qty > 0 ? unitPrice * qty : 0;
   const lineDiscAmt = (() => {
     if (!line.lineDiscount || !line.lineDiscount.value || grossLine <= 0) return 0;
     if (line.lineDiscount.type === "pct") {
@@ -1149,9 +1207,28 @@ function CartRow({
         <span className="text-sm text-gray-700 pt-2.5 tabular-nums hidden md:block">
           {qty && qty > 0 ? `${qty} dona` : "0 dona"}
         </span>
-        <span className="text-sm text-gray-900 pt-2.5 text-right tabular-nums">
-          {formatNumber(Number(product.price))}
-        </span>
+        <div className="pt-1.5">
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={unitPrice === 0 ? "" : String(unitPrice)}
+            onChange={(e) => onSetPrice(e.target.value.replace(/[^0-9]/g, ""))}
+            onFocus={(e) => e.target.select()}
+            aria-label={`Narx — ${product.title}`}
+            title={priceChanged ? `Asl narx: ${formatNumber(catalogPrice)}` : undefined}
+            className={`w-full h-9 px-2 rounded-md text-sm font-medium outline-none text-right tabular-nums transition ${
+              priceChanged
+                ? "border border-amber-400 bg-amber-50 text-amber-800 focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+                : "border border-gray-300 bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            }`}
+          />
+          {priceChanged && (
+            <p className="text-[10px] text-amber-600 text-right mt-0.5 tabular-nums leading-tight">
+              asl {formatNumber(catalogPrice)}
+            </p>
+          )}
+        </div>
         <div className="pt-2.5 text-right">
           <p className={`text-sm tabular-nums font-semibold ${isInvalid ? "text-gray-400" : "text-gray-900"}`}>
             {isInvalid ? "0" : formatNumber(netLine)}
@@ -1219,9 +1296,28 @@ function CartRow({
               <p className="mt-1 text-[10px] text-amber-600 leading-tight">Omborda atigi {stockNum} dona</p>
             )}
           </div>
-          <div className="text-right shrink-0">
+          <div className="text-right shrink-0 w-[80px]">
             <p className="text-[10px] uppercase tracking-wide text-gray-400">Narx</p>
-            <p className="text-sm text-gray-900 tabular-nums">{formatNumber(Number(product.price))}$</p>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={unitPrice === 0 ? "" : String(unitPrice)}
+              onChange={(e) => onSetPrice(e.target.value.replace(/[^0-9]/g, ""))}
+              onFocus={(e) => e.target.select()}
+              aria-label={`Narx — ${product.title}`}
+              title={priceChanged ? `Asl narx: ${formatNumber(catalogPrice)}$` : undefined}
+              className={`w-full h-9 px-2 rounded-md text-sm font-semibold outline-none text-right tabular-nums transition ${
+                priceChanged
+                  ? "border border-amber-400 bg-amber-50 text-amber-800 focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+                  : "border border-gray-300 bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              }`}
+            />
+            {priceChanged && (
+              <p className="text-[9px] text-amber-600 mt-0.5 tabular-nums leading-tight">
+                asl {formatNumber(catalogPrice)}$
+              </p>
+            )}
           </div>
           <div className="text-right shrink-0 min-w-[70px]">
             <p className="text-[10px] uppercase tracking-wide text-gray-400">Jami</p>
@@ -2395,16 +2491,26 @@ function PosProductDetailModal({
     qty: number,
     lineDiscount: { type: "pct" | "abs"; value: number } | null,
     note: string | null,
+    priceOverride: number | null,
   ) => void;
   onClose: () => void;
 }) {
+  const catalogPrice = Number(product.price) || 0;
   const [qtyStr, setQtyStr] = useState("");
+  // Pre-fill with catalog price so the operator only types when they want
+  // to override. Empty string ↔ "user cleared, going to type a new one";
+  // we still treat empty as invalid (canSave guards this).
+  const [priceStr, setPriceStr] = useState<string>(String(catalogPrice));
   const [discountStr, setDiscountStr] = useState("");
   const [discountType, setDiscountType] = useState<"pct" | "abs">("pct");
   const [note, setNote] = useState("");
-  const [activeField, setActiveField] = useState<"qty" | "discount">("qty");
+  // "price" added so the bito-style numeric keypad can edit the new
+  // editable price field too, not just qty/discount.
+  const [activeField, setActiveField] = useState<"qty" | "discount" | "price">("qty");
 
-  const price = Number(product.price) || 0;
+  const price = priceStr === "" ? 0 : Math.max(0, Math.floor(Number(priceStr) || 0));
+  const isPriceInvalid = price <= 0;
+  const priceChanged = price !== catalogPrice;
   const stockNum = typeof product.stock === "number" ? product.stock : 0;
   const qty = qtyStr === "" ? 0 : Math.max(0, Math.floor(Number(qtyStr) || 0));
   const isQtyInvalid = qty <= 0;
@@ -2427,6 +2533,12 @@ function PosProductDetailModal({
         const next = (cleaned + s).replace(/[^0-9]/g, "");
         return next.slice(0, 9);
       });
+    } else if (activeField === "price") {
+      setPriceStr((curr) => {
+        const cleaned = curr.replace(/^0+/, "");
+        const next = (cleaned + s).replace(/[^0-9]/g, "");
+        return next.slice(0, 12);
+      });
     } else {
       setDiscountStr((curr) => {
         const next = (curr + s).replace(/[^0-9.]/g, "");
@@ -2441,14 +2553,20 @@ function PosProductDetailModal({
   };
   const handleBackspace = () => {
     if (activeField === "qty") setQtyStr((s) => s.slice(0, -1));
+    else if (activeField === "price") setPriceStr((s) => s.slice(0, -1));
     else setDiscountStr((s) => s.slice(0, -1));
   };
   const handleClear = () => {
     if (activeField === "qty") setQtyStr("");
+    else if (activeField === "price") setPriceStr("");
     else setDiscountStr("");
   };
+  const handleResetPrice = () => {
+    setPriceStr(String(catalogPrice));
+    setActiveField("price");
+  };
 
-  const canSave = qty > 0;
+  const canSave = qty > 0 && price > 0;
 
   const handleSave = () => {
     if (!canSave) return;
@@ -2456,6 +2574,7 @@ function PosProductDetailModal({
       qty,
       discountValue > 0 ? { type: discountType, value: discountValue } : null,
       note.trim() || null,
+      priceChanged ? price : null,
     );
   };
 
@@ -2476,7 +2595,7 @@ function PosProductDetailModal({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canSave, qty, discountValue, discountType, note]);
+  }, [canSave, qty, price, discountValue, discountType, note]);
 
   const Key = ({ label, onClick, wide }: { label: React.ReactNode; onClick: () => void; wide?: boolean }) => (
     <button
@@ -2557,12 +2676,13 @@ function PosProductDetailModal({
               <FieldLabelRow label="Ombor:">
                 <FakeSelect value={`Asosiy (${stockNum} dona)`} />
               </FieldLabelRow>
-              <FieldLabelRow label="Narx:">
-                <FakeSelect value={`chakana (${formatUZS(price)})`} />
+              <FieldLabelRow label="Narx turi:">
+                <FakeSelect value={`chakana (asl ${formatUZS(catalogPrice)})`} />
               </FieldLabelRow>
             </div>
 
-            {/* Miqdor + Narx row */}
+            {/* Miqdor + Narx row — both editable. Narx defaults to catalog
+                price; cashier can override it for this sale only. */}
             <div className="mt-4 grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Miqdor</label>
@@ -2588,13 +2708,41 @@ function PosProductDetailModal({
                 )}
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-600 block mb-1">Narx</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-medium text-gray-600">Narx</label>
+                  {priceChanged && !isPriceInvalid && (
+                    <button
+                      type="button"
+                      onClick={handleResetPrice}
+                      className="text-[10px] font-semibold text-blue-600 hover:bg-blue-50 px-1.5 py-0.5 rounded transition"
+                      title="Katalog narxiga qaytarish"
+                    >
+                      Asl narx
+                    </button>
+                  )}
+                </div>
                 <input
                   type="text"
-                  readOnly
-                  value={fmt(price)}
-                  className="w-full h-10 px-3 rounded-lg border border-gray-200 bg-gray-50 text-sm font-semibold tabular-nums text-gray-700 outline-none"
+                  inputMode="numeric"
+                  value={priceStr}
+                  onChange={(e) => setPriceStr(e.target.value.replace(/[^0-9]/g, ""))}
+                  onFocus={() => setActiveField("price")}
+                  placeholder={String(catalogPrice)}
+                  className={`w-full h-10 px-3 rounded-lg text-sm font-semibold tabular-nums outline-none transition ${
+                    isPriceInvalid
+                      ? "border border-red-400 bg-red-50/60 text-red-700 focus:ring-2 focus:ring-red-100"
+                      : priceChanged
+                      ? "border border-amber-400 bg-amber-50 text-amber-800 focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+                      : "border border-gray-300 bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                  } ${activeField === "price" ? "ring-2 ring-blue-100 border-blue-400" : ""}`}
                 />
+                {isPriceInvalid ? (
+                  <p className="text-[11px] text-red-500 mt-1">Narxni kiriting</p>
+                ) : priceChanged ? (
+                  <p className="text-[11px] text-amber-600 mt-1 tabular-nums">
+                    Asl narx: {formatUZS(catalogPrice)}
+                  </p>
+                ) : null}
               </div>
             </div>
 
