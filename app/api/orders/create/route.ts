@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as admin from 'firebase-admin';
 import { getAdminApp } from '@/lib/firebase-admin';
 import { isAdminEmail } from '@/lib/admin-config';
+import { readNextInvoiceNo, commitInvoiceNo } from '@/lib/invoice-counter';
+import { roundMoney } from '@/lib/money';
 
 /**
  * Server-validated order creation.
@@ -145,6 +147,7 @@ export async function POST(req: NextRequest) {
                   ok: true,
                   dedup: true,
                   orderId,
+                  invoiceNo: typeof o.invoiceNo === 'number' ? o.invoiceNo : null,
                   totalPrice: o.totalPrice ?? 0,
                   totalQuantity: o.totalQuantity ?? 0,
                   basketItems: o.basketItems ?? [],
@@ -260,7 +263,10 @@ export async function POST(req: NextRequest) {
         }
         validatedBreakdown.push({
           method: e.method,
-          amount: Math.round(amt),
+          // Cents-precision: integer rounding here corrupted fractional
+          // totals (513.25 → 513) and desynced the recorded payment from
+          // the order's netTotal.
+          amount: roundMoney(amt),
           ...(due ? { dueDate: due } : {}),
           ...(e.note ? { note: String(e.note).slice(0, 200) } : {}),
         });
@@ -298,7 +304,7 @@ export async function POST(req: NextRequest) {
       string,
       { productId: string; quantity: number; unitPriceOverride?: number }
     >();
-    const UNIT_PRICE_MAX = 1_000_000_000; // 1 billion UZS — plenty of headroom
+    const UNIT_PRICE_MAX = 1_000_000_000; // upper sanity bound — plenty of headroom
     for (const it of items) {
       if (typeof it?.productId !== 'string' || !it.productId) {
         return NextResponse.json({ error: 'Invalid productId' }, { status: 400 });
@@ -325,7 +331,11 @@ export async function POST(req: NextRequest) {
             { status: 400 },
           );
         }
-        override = Math.floor(n);
+        // WHOLE-DOLLAR POLICY: cashier-negotiated prices are integers
+        // (34, 45). Math.round, never Math.floor — flooring silently
+        // re-priced decimal lines to the integer below and shaved the
+        // whole margin off (the "profit shows 6$ instead of 12$" bug).
+        override = Math.round(n);
       }
       const key = override !== undefined ? `${it.productId}#${override}` : it.productId;
       const existing = linesByKey.get(key);
@@ -361,6 +371,7 @@ export async function POST(req: NextRequest) {
     // ── Transaction: validate stock + create order atomically ──
     type TxResult = {
       orderId: string;
+      invoiceNo: number;
       totalPrice: number;
       totalQuantity: number;
       basketItems: OrderBasketItem[];
@@ -387,6 +398,10 @@ export async function POST(req: NextRequest) {
         // (totalUsed, usedBy[uid]) are atomic with the redemption write.
         const promoRef = promoCodeRefId ? db.collection('promoCodes').doc(promoCodeRefId) : null;
         const promoSnap = promoRef ? await tx.get(promoRef) : null;
+        // Sequential schyot-faktura number — read the counter in the same
+        // read phase; committed with the other writes below so concurrent
+        // sales can never draw the same number.
+        const nextInvoiceNo = await readNextInvoiceNo(db, tx);
 
         const productDataById = new Map<string, FirebaseFirestore.DocumentData>();
         for (let i = 0; i < productSnaps.length; i++) {
@@ -543,8 +558,8 @@ export async function POST(req: NextRequest) {
           const ptype = promoData.type === 'abs' ? 'abs' : 'pct';
           const pval = Math.max(0, Number(promoData.value) || 0);
           promoDiscountAmount = ptype === 'pct'
-            ? Math.round(totalPrice * (Math.min(100, pval) / 100))
-            : Math.min(Math.round(pval), totalPrice);
+            ? roundMoney(totalPrice * (Math.min(100, pval) / 100))
+            : Math.min(roundMoney(pval), totalPrice);
           promoCodeForOrder = String(promoData.code || promoCodeNormalized);
         }
 
@@ -552,15 +567,18 @@ export async function POST(req: NextRequest) {
         // Promo applies first (customer earned), then ticket discount on the
         // remainder. We DO NOT apply ticketDiscount on the original gross
         // separately — that would over-discount when both are present.
+        // All money is rounded to cents (fractional USD catalog), never
+        // to whole units.
+        totalPrice = roundMoney(totalPrice);
         const afterPromo = totalPrice - promoDiscountAmount;
         let ticketDiscountAmount = 0;
         if (validatedDiscount) {
           ticketDiscountAmount = validatedDiscount.type === 'pct'
-            ? Math.round(afterPromo * (validatedDiscount.value / 100))
-            : Math.min(Math.round(validatedDiscount.value), afterPromo);
+            ? roundMoney(afterPromo * (validatedDiscount.value / 100))
+            : Math.min(roundMoney(validatedDiscount.value), afterPromo);
         }
-        const discountAmount = promoDiscountAmount + ticketDiscountAmount;
-        const netTotal = totalPrice - discountAmount;
+        const discountAmount = roundMoney(promoDiscountAmount + ticketDiscountAmount);
+        const netTotal = roundMoney(totalPrice - discountAmount);
 
         // ── Validate payment breakdown sum (POS) ──
         if (validatedBreakdown) {
@@ -613,18 +631,26 @@ export async function POST(req: NextRequest) {
           userUid: orderUserUid,
           date: orderTimestamp,
           status: initialStatus,
+          invoiceNo: nextInvoiceNo,
           basketItems,
           totalPrice,
           totalQuantity,
           stockReserved: true,
           source: validatedSource,
+          // netTotal/discountAmount are written UNCONDITIONALLY. They used
+          // to be gated on ticketDiscount, so a promo-only order stored
+          // gross totalPrice with no netTotal and orderRevenue() overstated
+          // revenue by the promo amount.
+          discountAmount,
+          netTotal,
           ...(deliveryAddress?.trim() ? { deliveryAddress: deliveryAddress.trim() } : {}),
           ...(orderNote?.trim() ? { orderNote: orderNote.trim() } : {}),
           ...(resolvedPaymentMethod ? { paymentMethod: resolvedPaymentMethod } : {}),
           ...(breakdownForOrder ? { paymentBreakdown: breakdownForOrder } : {}),
-          ...(validatedDiscount ? { ticketDiscount: validatedDiscount, discountAmount, netTotal } : {}),
+          ...(validatedDiscount ? { ticketDiscount: validatedDiscount } : {}),
           ...(promoCodeForOrder ? { promoCode: promoCodeForOrder, promoDiscountAmount } : {}),
         });
+        commitInvoiceNo(db, tx, nextInvoiceNo);
 
         // ── Atomically increment promo redemption counters ──
         if (promoRef) {
@@ -662,6 +688,7 @@ export async function POST(req: NextRequest) {
 
         return {
           orderId: orderRef.id,
+          invoiceNo: nextInvoiceNo,
           totalPrice,
           totalQuantity,
           basketItems,
@@ -741,6 +768,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       orderId: txResult.orderId,
+      invoiceNo: txResult.invoiceNo,
       totalPrice: txResult.totalPrice,
       totalQuantity: txResult.totalQuantity,
       basketItems: txResult.basketItems,

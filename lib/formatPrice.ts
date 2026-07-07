@@ -16,9 +16,15 @@
 export function formatUZS(price: string | number): string {
   const num = typeof price === 'string' ? Number(price) : price;
   if (isNaN(num)) return '0$';
+  // Cents matter: the catalog stores fractional USD prices (52.58$) and
+  // costs (51.58$). With maximumFractionDigits: 0 a 5.75$ profit rendered
+  // as "6$" and a 513.25$ total as "513$" — misreporting money to the
+  // operator. Whole amounts still render clean ("507$"), fractional ones
+  // keep their cents ("5.75$").
   const formatted = new Intl.NumberFormat('en-US', {
     useGrouping: true,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
   }).format(num);
   return `${formatted}$`;
 }
@@ -35,6 +41,7 @@ export function formatNumber(price: string | number): string {
   if (isNaN(num)) return '0';
   return new Intl.NumberFormat('en-US', {
     useGrouping: true,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
   }).format(num);
 }

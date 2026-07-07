@@ -97,6 +97,9 @@ const Orders = () => {
       list = list.filter(o => {
         if (o.clientName && matchesSearch(o.clientName, search)) return true;
         if (o.id && o.id.toLowerCase().includes(q)) return true;
+        // Sequential № — operators search for the number printed on the
+        // schyot-faktura ("12"), possibly with the № prefix.
+        if (String(o.invoiceNo ?? '').includes(q.replace(/^№\s*/, ''))) return true;
         if (o.clientPhone) {
           if (qPhoneCanon && canonicalPhone(o.clientPhone).includes(qPhoneCanon)) return true;
           if (o.clientPhone.includes(search)) return true;
@@ -389,6 +392,11 @@ const Orders = () => {
                         <span className="sm:hidden text-sm font-bold text-green-600 tabular-nums shrink-0">{formatUZS(order.totalPrice)}</span>
                       </div>
                       <div className="mt-1 sm:mt-0 flex items-center gap-1.5 sm:gap-3 flex-wrap">
+                        {typeof order.invoiceNo === 'number' && (
+                          <span className="text-[10px] sm:text-xs bg-blue-50 text-blue-700 font-semibold px-1.5 sm:px-2 py-0.5 rounded-full tabular-nums">
+                            № {order.invoiceNo}
+                          </span>
+                        )}
                         <StatusBadge status={order.status} />
                         <span className="text-[10px] sm:text-xs bg-gray-100 text-gray-600 px-1.5 sm:px-2 py-0.5 rounded-full">
                           {order.totalQuantity} ta

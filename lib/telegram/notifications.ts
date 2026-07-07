@@ -2,6 +2,7 @@
 import { telegram } from './bot';
 import { getDb } from './admin-app';
 import { formatOrderNotification, formatStatusUpdate, formatWelcome } from './formatter';
+import { formatOrderNo } from '../orderNumber';
 import { mainMenuKeyboard } from './keyboards';
 
 async function findTelegramUser(userUid: string) {
@@ -17,6 +18,7 @@ async function findTelegramUser(userUid: string) {
 
 export async function notifyOrderConfirmed(order: {
   id: string;
+  invoiceNo?: number;
   clientName: string;
   totalPrice: number;
   totalQuantity: number;
@@ -39,6 +41,7 @@ export async function notifyOrderConfirmed(order: {
 
 export async function notifyOrderStatusChanged(order: {
   id: string;
+  invoiceNo?: number;
   clientName: string;
   totalPrice: number;
   userUid: string;
@@ -58,6 +61,7 @@ export async function notifyOrderStatusChanged(order: {
 
 export async function notifyDeliveryArriving(order: {
   id: string;
+  invoiceNo?: number;
   clientName: string;
   totalPrice: number;
   userUid: string;
@@ -71,7 +75,7 @@ export async function notifyDeliveryArriving(order: {
       [
         '🚚 <b>Buyurtmangiz yo\'lda!</b>',
         '',
-        `🆔 Buyurtma: <code>${order.id.slice(-8).toUpperCase()}</code>`,
+        `🆔 Buyurtma: <code>${formatOrderNo(order)}</code>`,
         `💰 Summa: ${Number(order.totalPrice).toLocaleString('en-US')}$`,
         '',
         '📞 Kuryer tez orada siz bilan bog\'lanadi.',

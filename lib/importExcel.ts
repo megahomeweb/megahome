@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { CategoryI } from './types';
+import { toWholeMoney } from './money';
 
 export interface ParsedProduct {
   title: string;
@@ -135,8 +136,13 @@ export function parseProductsFromFile(file: File, categories: CategoryI[]): Prom
           const title = get(row, 'title');
           const rawCategory = get(row, 'category');
           const rawSubcategory = get(row, 'subcategory');
-          const price = get(row, 'price') || '0';
-          const costPrice = Number(get(row, 'costPrice') || 0);
+          // Whole-dollar policy: supplier files often carry cent-precision
+          // prices (52.58). Import normalizes to integers so no ".58"
+          // ever enters the catalog — this is the exact source of the
+          // decimal prices that broke the POS margin.
+          const rawPrice = get(row, 'price') || '0';
+          const price = isNaN(Number(rawPrice)) ? rawPrice : String(toWholeMoney(rawPrice));
+          const costPrice = toWholeMoney(get(row, 'costPrice') || 0);
           const rawStock = get(row, 'stock');
           const stock = rawStock === '' ? 1 : Number(rawStock);
           const description = get(row, 'description');

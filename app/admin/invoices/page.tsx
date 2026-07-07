@@ -7,6 +7,7 @@ import { formatUZS } from '@/lib/formatPrice';
 import { formatDateTimeShort } from "@/lib/formatDate";
 import { getStatusInfo } from '@/lib/orderStatus';
 import { orderRevenue } from '@/lib/orderMath';
+import { formatOrderNo } from '@/lib/orderNumber';
 import { FileText, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -34,12 +35,19 @@ const InvoicesPage = () => {
 
   const filteredOrders = useMemo(() => {
     const startMs = getStartDate(period);
-    let result = orders.filter((o) => {
+    const result = orders.filter((o) => {
       const orderMs = o.date?.seconds ? o.date.seconds * 1000 : 0;
       if (orderMs < startMs) return false;
       if (search.length >= 2) {
         const q = search.toLowerCase();
-        return o.clientName?.toLowerCase().includes(q) || o.clientPhone?.includes(q) || o.id?.toLowerCase().includes(q);
+        // Match the sequential № too — the operator searches for the
+        // number printed on the faktura, not the Firestore id.
+        return (
+          o.clientName?.toLowerCase().includes(q) ||
+          o.clientPhone?.includes(q) ||
+          o.id?.toLowerCase().includes(q) ||
+          String(o.invoiceNo ?? '').includes(q.replace(/^№\s*/, ''))
+        );
       }
       return true;
     });
@@ -78,7 +86,7 @@ const InvoicesPage = () => {
             { key: 'month', label: 'Shu oy' },
             { key: 'all', label: 'Barchasi' },
           ].map((p) => (
-            <button key={p.key} onClick={() => setPeriod(p.key as any)}
+            <button key={p.key} onClick={() => setPeriod(p.key as 'today' | 'week' | 'month' | 'all')}
               className={`shrink-0 px-3 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium transition-colors ${
                 period === p.key ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}>
@@ -123,7 +131,7 @@ const InvoicesPage = () => {
             {filteredOrders.map((order, idx) => {
               const statusInfo = getStatusInfo(order.status);
               const date = formatDateTimeShort(order.date);
-              const invoiceNum = order.id.slice(-8).toUpperCase();
+              const invoiceNum = formatOrderNo(order);
 
               return (
                 <div
@@ -156,7 +164,7 @@ const InvoicesPage = () => {
                     {/* Right cluster — wraps to its own line on narrow phones */}
                     <div className="flex items-center gap-2 sm:gap-4 flex-wrap shrink-0">
                       <div className="hidden sm:block text-right">
-                        <p className="text-xs text-gray-400">#{invoiceNum}</p>
+                        <p className="text-xs font-semibold text-gray-500">№ {invoiceNum}</p>
                         <p className="text-xs text-gray-500">{date}</p>
                       </div>
                       <div className="text-right">
@@ -180,7 +188,7 @@ const InvoicesPage = () => {
                   </div>
                   {/* Mobile-only meta row */}
                   <div className="sm:hidden flex items-center justify-between mt-1.5 pt-1.5 border-t border-gray-100 text-[10px] text-gray-400">
-                    <span>#{invoiceNum}</span>
+                    <span className="font-semibold">№ {invoiceNum}</span>
                     <span>{date}</span>
                   </div>
                 </div>

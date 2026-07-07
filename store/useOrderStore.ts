@@ -59,6 +59,8 @@ export interface CreateOrderInput {
 export interface CreateOrderResult {
   ok: true;
   orderId: string;
+  /** Sequential schyot-faktura number allocated by the server. */
+  invoiceNo?: number;
   totalPrice: number;
   totalQuantity: number;
   basketItems: ProductT[];
@@ -146,6 +148,7 @@ export const useOrderStore = create<StoreState>((set, get) => ({
       return {
         ok: true,
         orderId: body.orderId,
+        invoiceNo: typeof body.invoiceNo === 'number' ? body.invoiceNo : undefined,
         totalPrice: body.totalPrice,
         totalQuantity: body.totalQuantity,
         basketItems: body.basketItems,
@@ -395,37 +398,59 @@ export const useOrderStore = create<StoreState>((set, get) => ({
   fetchAllOrders: () => {
     if (get()._unsubOrders) return;
     set({ loadingOrders: true });
-    try {
-      // Server-ordered by date desc + capped — see ORDERS_LIST_DEFAULT_CAP
-      // for rationale. Previously the listener pulled every order in
-      // arbitrary Firestore document order, which made the dashboard
-      // increasingly expensive as the catalog grew and broke any
-      // assumption that `orders[0]` was the newest entry.
-      const q = query(
-        collection(fireDB, "orders"),
-        orderBy("date", "desc"),
-        fbLimit(ORDERS_LIST_DEFAULT_CAP),
-      );
-      const unsubscribe = onSnapshot(q, (QuerySnapshot) => {
-        const OrderArray: Order[] = [];
-        QuerySnapshot.forEach((d) => {
-          OrderArray.push({ ...d.data(), id: d.id } as Order);
-        });
-        if (QuerySnapshot.size === ORDERS_LIST_DEFAULT_CAP) {
-          // Heads-up so an operator on a high-volume shop notices that
-          // dashboards are bounded and can request a wider query.
-          console.warn(
-            `[useOrderStore] orders cap hit (${ORDERS_LIST_DEFAULT_CAP}) — ` +
-            `older orders are not loaded. Add date-range filters for full history.`,
-          );
-        }
-        set({ orders: OrderArray, loadingOrders: false });
-      });
-      set({ _unsubOrders: unsubscribe });
-    } catch (error) {
-      console.error("Error fetching orders: ", error);
-      set({ loadingOrders: false });
-    }
+    // Reserve the slot synchronously so a second caller can't race past
+    // the guard above while we wait for auth below; cleanup() before the
+    // real listener attaches simply cancels the attach.
+    let cancelled = false;
+    set({ _unsubOrders: () => { cancelled = true; } });
+    // Wait for Firebase Auth to restore the session BEFORE subscribing.
+    // On a hard page load the page's useEffect fires before auth
+    // rehydrates; a listener attached unauthenticated is denied by the
+    // rules and onSnapshot TERMINATES (it does not retry after login),
+    // which left the invoices/orders pages on a forever-spinner.
+    auth.authStateReady().then(() => {
+      if (cancelled) return;
+      try {
+        // Server-ordered by date desc + capped — see ORDERS_LIST_DEFAULT_CAP
+        // for rationale. Previously the listener pulled every order in
+        // arbitrary Firestore document order, which made the dashboard
+        // increasingly expensive as the catalog grew and broke any
+        // assumption that `orders[0]` was the newest entry.
+        const q = query(
+          collection(fireDB, "orders"),
+          orderBy("date", "desc"),
+          fbLimit(ORDERS_LIST_DEFAULT_CAP),
+        );
+        const unsubscribe = onSnapshot(
+          q,
+          (QuerySnapshot) => {
+            const OrderArray: Order[] = [];
+            QuerySnapshot.forEach((d) => {
+              OrderArray.push({ ...d.data(), id: d.id } as Order);
+            });
+            if (QuerySnapshot.size === ORDERS_LIST_DEFAULT_CAP) {
+              // Heads-up so an operator on a high-volume shop notices that
+              // dashboards are bounded and can request a wider query.
+              console.warn(
+                `[useOrderStore] orders cap hit (${ORDERS_LIST_DEFAULT_CAP}) — ` +
+                `older orders are not loaded. Add date-range filters for full history.`,
+              );
+            }
+            set({ orders: OrderArray, loadingOrders: false });
+          },
+          (error) => {
+            // Permission-denied (or any stream error) must never strand
+            // the UI on a spinner — surface the empty state instead.
+            console.error("[useOrderStore] orders listener error:", error);
+            set({ orders: [], loadingOrders: false });
+          },
+        );
+        set({ _unsubOrders: () => { cancelled = true; unsubscribe(); } });
+      } catch (error) {
+        console.error("Error fetching orders: ", error);
+        set({ loadingOrders: false });
+      }
+    });
   },
 
   fetchUserOrders: (userUid: string) => {
@@ -433,26 +458,40 @@ export const useOrderStore = create<StoreState>((set, get) => ({
     // or navigating between admin (all orders) and customer (own orders) views.
     get().cleanup();
     set({ loadingOrders: true });
-    try {
-      // Server-side ordering by date desc — the customer history page
-      // previously rendered orders in arbitrary Firestore-default order.
-      const q = query(
-        collection(fireDB, "orders"),
-        where("userUid", "==", userUid),
-        orderBy("date", "desc"),
-      );
-      const unsubscribe = onSnapshot(q, (QuerySnapshot) => {
-        const OrderArray: Order[] = [];
-        QuerySnapshot.forEach((d) => {
-          OrderArray.push({ ...d.data(), id: d.id } as Order);
-        });
-        set({ orders: OrderArray, loadingOrders: false });
-      });
-      set({ _unsubOrders: unsubscribe });
-    } catch (error) {
-      console.error("Error fetching user orders: ", error);
-      set({ loadingOrders: false });
-    }
+    let cancelled = false;
+    set({ _unsubOrders: () => { cancelled = true; } });
+    // Same auth-first discipline as fetchAllOrders — a pre-auth listener
+    // is denied and dies silently, stranding the history page spinner.
+    auth.authStateReady().then(() => {
+      if (cancelled) return;
+      try {
+        // Server-side ordering by date desc — the customer history page
+        // previously rendered orders in arbitrary Firestore-default order.
+        const q = query(
+          collection(fireDB, "orders"),
+          where("userUid", "==", userUid),
+          orderBy("date", "desc"),
+        );
+        const unsubscribe = onSnapshot(
+          q,
+          (QuerySnapshot) => {
+            const OrderArray: Order[] = [];
+            QuerySnapshot.forEach((d) => {
+              OrderArray.push({ ...d.data(), id: d.id } as Order);
+            });
+            set({ orders: OrderArray, loadingOrders: false });
+          },
+          (error) => {
+            console.error("[useOrderStore] user orders listener error:", error);
+            set({ orders: [], loadingOrders: false });
+          },
+        );
+        set({ _unsubOrders: () => { cancelled = true; unsubscribe(); } });
+      } catch (error) {
+        console.error("Error fetching user orders: ", error);
+        set({ loadingOrders: false });
+      }
+    });
   },
 }));
 

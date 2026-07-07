@@ -24,6 +24,7 @@ import { useAuthStore, type UserData } from "@/store/authStore";
 import useProductStore from "@/store/useProductStore";
 import { useOrderStore } from "@/store/useOrderStore";
 import { formatUZS, formatNumber } from "@/lib/formatPrice";
+import { displayOrderNo } from "@/lib/orderNumber";
 import { matchesSearch } from "@/lib/searchMatch";
 import { auth } from "@/firebase/config";
 import { getStatusInfo } from "@/lib/orderStatus";
@@ -97,6 +98,7 @@ type Stage = "shopping" | "tender" | "success";
 
 interface SuccessInfo {
   orderId: string;
+  invoiceNo?: number;
   total: number;
   netTotal: number;
   cashGiven: number;
@@ -369,11 +371,13 @@ export default function PosScreen() {
       // Treat an override equal to catalog price as "no override" so the
       // basket entry stays clean (cart row won't show the modified badge,
       // server won't be asked to store an audit field needlessly).
+      // Cents-precision: never floor a price — flooring turned untouched
+      // fractional catalog prices into phantom overrides and ate margin.
       const normalizedOverride =
         typeof priceOverride === "number" &&
         priceOverride > 0 &&
         priceOverride !== catalogPrice
-          ? Math.floor(priceOverride)
+          ? Math.round(priceOverride * 100) / 100
           : null;
       setCart((prev) => [
         ...prev,
@@ -406,14 +410,17 @@ export default function PosScreen() {
 
   // Per-line price override. Empty input or a value matching the catalog
   // price clears the override (so the row falls back to product.price).
+  // parseFloat + round-to-cents: parseInt truncated fractional USD prices
+  // ("52.58" → 52) and created phantom overrides below catalog.
   const setPrice = useCallback((rowId: string, raw: string) => {
     setCart((prev) =>
       prev.map((l) => {
         if (l.rowId !== rowId) return l;
         const catalogPrice = Number(l.product.price) || 0;
         if (raw === "") return { ...l, priceOverride: null };
-        const n = parseInt(raw, 10);
-        if (Number.isNaN(n) || n < 0) return { ...l, priceOverride: null };
+        const parsed = parseFloat(raw);
+        if (Number.isNaN(parsed) || parsed < 0) return { ...l, priceOverride: null };
+        const n = Math.round(parsed * 100) / 100;
         if (n === catalogPrice) return { ...l, priceOverride: null };
         return { ...l, priceOverride: n };
       }),
@@ -553,6 +560,7 @@ export default function PosScreen() {
 
         setSuccessInfo({
           orderId: result.orderId,
+          invoiceNo: result.invoiceNo,
           total: subtotal,
           netTotal,
           cashGiven: opts?.cashGiven ?? 0,
@@ -1149,6 +1157,17 @@ function CartRow({
   const catalogPrice = Number(product.price) || 0;
   const unitPrice = effectiveUnitPrice(line);
   const priceChanged = unitPrice !== catalogPrice;
+  // Local draft so partial input survives typing (the input is otherwise
+  // controlled by the PARSED number). Digits-only: selling prices are
+  // whole dollars by policy — no decimals typed at the POS.
+  const [priceDraft, setPriceDraft] = useState<string | null>(null);
+  const priceInputValue = priceDraft !== null ? priceDraft : unitPrice === 0 ? "" : String(unitPrice);
+  const handlePriceChange = (v: string) => {
+    const clean = v.replace(/[^0-9]/g, "").slice(0, 12);
+    setPriceDraft(clean);
+    onSetPrice(clean);
+  };
+  const handlePriceBlur = () => setPriceDraft(null);
   const grossLine = qty && qty > 0 ? unitPrice * qty : 0;
   const lineDiscAmt = (() => {
     if (!line.lineDiscount || !line.lineDiscount.value || grossLine <= 0) return 0;
@@ -1211,9 +1230,9 @@ function CartRow({
           <input
             type="text"
             inputMode="numeric"
-            pattern="[0-9]*"
-            value={unitPrice === 0 ? "" : String(unitPrice)}
-            onChange={(e) => onSetPrice(e.target.value.replace(/[^0-9]/g, ""))}
+            value={priceInputValue}
+            onChange={(e) => handlePriceChange(e.target.value)}
+            onBlur={handlePriceBlur}
             onFocus={(e) => e.target.select()}
             aria-label={`Narx — ${product.title}`}
             title={priceChanged ? `Asl narx: ${formatNumber(catalogPrice)}` : undefined}
@@ -1301,9 +1320,9 @@ function CartRow({
             <input
               type="text"
               inputMode="numeric"
-              pattern="[0-9]*"
-              value={unitPrice === 0 ? "" : String(unitPrice)}
-              onChange={(e) => onSetPrice(e.target.value.replace(/[^0-9]/g, ""))}
+              value={priceInputValue}
+              onChange={(e) => handlePriceChange(e.target.value)}
+              onBlur={handlePriceBlur}
               onFocus={(e) => e.target.select()}
               aria-label={`Narx — ${product.title}`}
               title={priceChanged ? `Asl narx: ${formatNumber(catalogPrice)}$` : undefined}
@@ -2401,7 +2420,7 @@ function CheklarModal({
                       <td className="px-2 py-2.5 text-gray-500 tabular-nums">{idx}</td>
                       <td className="px-2 py-2.5 text-gray-700 tabular-nums">{fmtDate(o.date?.seconds)}</td>
                       <td className="px-2 py-2.5 text-gray-700 font-mono text-xs">{(o.id || "").slice(0, 8).toUpperCase()}</td>
-                      <td className="px-2 py-2.5 text-gray-700 font-mono text-xs">№ {(o.id || "").slice(-6).toUpperCase()}</td>
+                      <td className="px-2 py-2.5 text-gray-700 font-mono text-xs">{displayOrderNo(o)}</td>
                       <td className="px-2 py-2.5">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold ${statusInfo.color} ${statusInfo.bg}`}>
                           {statusInfo.label}
@@ -2508,7 +2527,13 @@ function PosProductDetailModal({
   // editable price field too, not just qty/discount.
   const [activeField, setActiveField] = useState<"qty" | "discount" | "price">("qty");
 
-  const price = priceStr === "" ? 0 : Math.max(0, Math.floor(Number(priceStr) || 0));
+  // Parse WITHOUT integer coercion. The old Math.floor here silently
+  // re-priced an UNTOUCHED prefill (legacy "52.58" → 52), flagged it as a
+  // cashier override, and shaved the whole margin off — the "profit shows
+  // 6$ instead of 12$" bug. Typing is digits-only (whole-dollar policy),
+  // so cashier-entered prices are always integers; a legacy fractional
+  // prefill passes through UNCHANGED and never becomes a phantom override.
+  const price = priceStr === "" ? 0 : Math.max(0, Math.round((Number(priceStr) || 0) * 100) / 100);
   const isPriceInvalid = price <= 0;
   const priceChanged = price !== catalogPrice;
   const stockNum = typeof product.stock === "number" ? product.stock : 0;
@@ -2534,8 +2559,11 @@ function PosProductDetailModal({
         return next.slice(0, 9);
       });
     } else if (activeField === "price") {
+      // WHOLE-DOLLAR POLICY: selling prices are typed as integers only
+      // (34, 45 — no decimals). The parse below still tolerates a legacy
+      // fractional catalog prefill without corrupting it.
       setPriceStr((curr) => {
-        const cleaned = curr.replace(/^0+/, "");
+        const cleaned = curr.replace(/^0+(?=\d)/, "");
         const next = (cleaned + s).replace(/[^0-9]/g, "");
         return next.slice(0, 12);
       });
@@ -2547,6 +2575,8 @@ function PosProductDetailModal({
     }
   };
   const handleDot = () => {
+    // Dot applies to the DISCOUNT field only — selling prices are whole
+    // dollars by policy.
     if (activeField === "discount" && !discountStr.includes(".")) {
       setDiscountStr((s) => (s === "" ? "0." : s + "."));
     }
@@ -2609,7 +2639,9 @@ function PosProductDetailModal({
   );
 
   const sku = (product.id || "").slice(0, 8).toUpperCase();
-  const fmt = (n: number) => formatNumber(Math.round(n));
+  // Round to cents for display — integer rounding hid the fractional
+  // prices this modal now supports.
+  const fmt = (n: number) => formatNumber(Math.round(n * 100) / 100);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
@@ -2725,7 +2757,7 @@ function PosProductDetailModal({
                   type="text"
                   inputMode="numeric"
                   value={priceStr}
-                  onChange={(e) => setPriceStr(e.target.value.replace(/[^0-9]/g, ""))}
+                  onChange={(e) => setPriceStr(e.target.value.replace(/[^0-9]/g, "").slice(0, 12))}
                   onFocus={() => setActiveField("price")}
                   placeholder={String(catalogPrice)}
                   className={`w-full h-10 px-3 rounded-lg text-sm font-semibold tabular-nums outline-none transition ${
@@ -2891,7 +2923,9 @@ function PosSuccess({
           <Check className="size-10 text-emerald-600" strokeWidth={3} />
         </div>
         <h2 className="text-2xl font-extrabold text-gray-900 mb-1">Sotuv yakunlandi!</h2>
-        <p className="text-sm text-gray-500 mb-5">№ {info.orderId.slice(0, 8).toUpperCase()}</p>
+        <p className="text-sm text-gray-500 mb-5">
+          Chek {displayOrderNo({ invoiceNo: info.invoiceNo, id: info.orderId })}
+        </p>
 
         <div className="bg-gray-50 rounded-2xl p-4 mb-5 text-left space-y-2">
           <div className="flex justify-between">

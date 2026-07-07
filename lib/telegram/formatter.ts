@@ -1,4 +1,5 @@
 // Message formatting utilities for Telegram bot — all text in Uzbek
+import { formatOrderNo } from '../orderNumber';
 
 const STATUS_LABELS: Record<string, string> = {
   yangi: '🆕 Yangi',
@@ -108,6 +109,7 @@ export function formatCartSummary(
 
 export function formatOrderNotification(order: {
   id: string;
+  invoiceNo?: number;
   clientName: string;
   totalPrice: number;
   totalQuantity: number;
@@ -121,7 +123,7 @@ export function formatOrderNotification(order: {
   return [
     '✅ <b>Buyurtmangiz qabul qilindi!</b>',
     '',
-    `🆔 Buyurtma: <code>${order.id.slice(-8).toUpperCase()}</code>`,
+    `🆔 Buyurtma: <code>${formatOrderNo(order)}</code>`,
     `📦 Mahsulotlar: ${order.totalQuantity} ta`,
     `💰 Jami: <b>${formatPrice(order.totalPrice)}</b>`,
     '',
@@ -132,14 +134,14 @@ export function formatOrderNotification(order: {
 }
 
 export function formatStatusUpdate(
-  order: { id: string; clientName: string; totalPrice: number },
+  order: { id: string; invoiceNo?: number; clientName: string; totalPrice: number },
   newStatus: string
 ): string {
   const label = STATUS_LABELS[newStatus] || newStatus;
   return [
     `📋 <b>Buyurtma holati yangilandi</b>`,
     '',
-    `🆔 Buyurtma: <code>${order.id.slice(-8).toUpperCase()}</code>`,
+    `🆔 Buyurtma: <code>${formatOrderNo(order)}</code>`,
     `📊 Holat: ${label}`,
     `💰 Summa: ${formatPrice(order.totalPrice)}`,
   ].join('\n');
@@ -149,6 +151,7 @@ export function formatStatusUpdate(
 
 export function formatNewOrderAlert(order: {
   id: string;
+  invoiceNo?: number;
   clientName: string;
   clientPhone: string;
   totalPrice: number;
@@ -163,6 +166,7 @@ export function formatNewOrderAlert(order: {
   return [
     '🔔 <b>YANGI BUYURTMA!</b>',
     '',
+    `🆔 Buyurtma: <code>${formatOrderNo(order)}</code>`,
     `👤 Mijoz: <b>${escapeHtml(order.clientName)}</b>`,
     `📞 Telefon: ${order.clientPhone}`,
     `💰 Summa: <b>${formatPrice(order.totalPrice)}</b>`,

@@ -1,6 +1,7 @@
 import { telegram } from '../bot';
 import { getDb } from '../admin-app';
 import { formatStatusUpdate, escapeHtml } from '../formatter';
+import { formatOrderNo } from '../../orderNumber';
 import { orderHistoryKeyboard, mainMenuKeyboard } from '../keyboards';
 
 const STATUS_LABELS: Record<string, string> = {
@@ -85,7 +86,7 @@ export async function handleOrderDetail(chatId: number, orderId: string): Promis
   const text = [
     `📋 <b>Buyurtma tafsiloti</b>`,
     '',
-    `🆔 Raqam: <code>${orderId.slice(-8).toUpperCase()}</code>`,
+    `🆔 Raqam: <code>${formatOrderNo({ invoiceNo: data.invoiceNo, id: orderId })}</code>`,
     `📅 Sana: ${dateObj.toLocaleDateString('uz-UZ')}`,
     `📊 Holat: ${statusLabel}`,
     '',

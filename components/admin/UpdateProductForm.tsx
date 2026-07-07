@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fireStorage } from "@/firebase/config";
 import { ImageT, ProductT } from "@/lib/types";
+import { toWholeMoney } from "@/lib/money";
 import { sanitizeFilename } from "@/lib/sanitizeFilename";
 import useCategoryStore from "@/store/useCategoryStore";
 import useProductStore from "@/store/useProductStore";
@@ -157,7 +158,12 @@ const UpdateProductForm = ({ id }: { id: string }) => {
 
     setSubmitUploading(true);
     try {
-      await updateProduct(id, updatedProduct);
+      // Whole-dollar policy: normalize price/cost to integers on save.
+      await updateProduct(id, {
+        ...updatedProduct,
+        price: String(toWholeMoney(updatedProduct.price)),
+        costPrice: toWholeMoney(updatedProduct.costPrice ?? 0),
+      });
       toast.success('Mahsulot yangilandi');
       navigate.push('/admin/products');
     } catch (error) {

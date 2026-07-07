@@ -7,6 +7,7 @@ import { isCompletedSale, orderRevenue, orderCost } from '@/lib/orderMath';
 import { TrendingUp, TrendingDown, DollarSign, ShoppingCart, BarChart3 } from 'lucide-react';
 import RevenueChart from '@/components/admin/charts/RevenueChart';
 import DailyOrdersChart from '@/components/admin/charts/DailyOrdersChart';
+import ClearReportsPanel from '@/components/admin/ClearReportsPanel';
 
 type Period = 'today' | 'week' | 'month' | 'all';
 
@@ -369,6 +370,9 @@ const ReportsPage = () => {
             </>
           )}
         </div>
+
+        {/* Danger zone — wipe sales history, restart reports from zero */}
+        <ClearReportsPanel />
       </div>
     </div>
   );

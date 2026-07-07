@@ -65,12 +65,24 @@ export interface Order {
   totalQuantity: number;
   userUid: string;
   status?: OrderStatus;
+  /**
+   * Sequential document number (1, 2, 3 …) allocated atomically from
+   * counters/orders inside the order-creation transaction. This is THE
+   * number shown on the schyot-faktura and everywhere an order is
+   * referenced. Optional because orders created before the counter
+   * existed may lack it until the backfill migration runs.
+   */
+  invoiceNo?: number;
   // POS / payment fields (optional — legacy orders predate them)
   paymentMethod?: PaymentMethod | string;
   paymentBreakdown?: PaymentEntry[];
   source?: OrderSource;
   ticketDiscount?: TicketDiscount;
-  netTotal?: number; // totalPrice - ticketDiscount; equals sum(paymentBreakdown.amount)
+  netTotal?: number; // totalPrice - discounts; equals sum(paymentBreakdown.amount)
+  /** Promo + ticket discount combined, in currency units. */
+  discountAmount?: number;
+  promoCode?: string;
+  promoDiscountAmount?: number;
 }
 
 // Promo / discount code — admins create from /admin/promo, customers redeem

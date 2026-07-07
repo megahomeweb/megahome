@@ -6,6 +6,7 @@ const getAdminChatId = () => process.env.TELEGRAM_ADMIN_CHAT_ID;
 
 export async function alertNewOrder(order: {
   id: string;
+  invoiceNo?: number;
   clientName: string;
   clientPhone: string;
   totalPrice: number;

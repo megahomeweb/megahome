@@ -129,12 +129,15 @@ const SubmitModal = ({ setOpen }: props) => {
       telegramNotify('order_placed', { orderId: result.orderId });
 
       clearBasket();
-      // Show the order ID so the customer knows what to reference if they
-      // need to call support, and route to history so they can SEE their
-      // order — previous flow dumped them on the home page with no proof
-      // anything had happened.
-      const shortId = result.orderId.slice(0, 8).toUpperCase();
-      toast.success(`✅ Buyurtma qabul qilindi · № ${shortId}`, { duration: 6000 });
+      // Show the sequential order № so the customer knows what to
+      // reference if they need to call support, and route to history so
+      // they can SEE their order — previous flow dumped them on the home
+      // page with no proof anything had happened.
+      const displayNo =
+        typeof result.invoiceNo === 'number'
+          ? String(result.invoiceNo)
+          : result.orderId.slice(0, 8).toUpperCase();
+      toast.success(`✅ Buyurtma qabul qilindi · № ${displayNo}`, { duration: 6000 });
       navigate.push('/history-order');
     } catch (error) {
       console.error(error);

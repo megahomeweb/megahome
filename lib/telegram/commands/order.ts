@@ -3,6 +3,7 @@ import { getDb } from '../admin-app';
 import { formatCartSummary, formatOrderNotification, formatNewOrderAlert } from '../formatter';
 import { confirmOrderKeyboard, mainMenuKeyboard } from '../keyboards';
 import { getCart, clearCart, handleAddToCart } from './cart';
+import { readNextInvoiceNo, commitInvoiceNo } from '../../invoice-counter';
 
 export async function handleOrder(chatId: number): Promise<void> {
   const db = getDb();
@@ -73,6 +74,7 @@ export async function handleConfirmOrder(chatId: number): Promise<void> {
   // mirroring /api/orders/create — same price/stock rules regardless of
   // whether the order was placed from the website or from the bot.
   let orderId = '';
+  let orderInvoiceNo: number | undefined;
   let totalPrice = 0;
   let totalQuantity = 0;
   let basketItems: Array<{
@@ -85,6 +87,9 @@ export async function handleConfirmOrder(chatId: number): Promise<void> {
     const result = await db.runTransaction(async (tx) => {
       const productRefs = items.map((i) => db.collection('products').doc(i.productId));
       const productSnaps = await Promise.all(productRefs.map((r) => tx.get(r)));
+      // Same sequential schyot-faktura counter as /api/orders/create —
+      // Telegram orders are part of the one numbering sequence.
+      const nextInvoiceNo = await readNextInvoiceNo(db, tx);
 
       const snapshot: Array<{ id: string; available: number; quantity: number; data: FirebaseFirestore.DocumentData }> = [];
       for (let i = 0; i < productSnaps.length; i++) {
@@ -129,18 +134,22 @@ export async function handleConfirmOrder(chatId: number): Promise<void> {
         clientName: profile.name || '',
         clientPhone: profile.phone || '',
         date: new Date(),
+        invoiceNo: nextInvoiceNo,
         basketItems: bi,
         totalPrice: tp,
         totalQuantity: tq,
         userUid,
         status: 'yangi',
         stockReserved: true,
+        source: 'telegram',
         orderNote: 'Telegram bot orqali buyurtma',
       });
+      commitInvoiceNo(db, tx, nextInvoiceNo);
 
-      return { orderId: orderRef.id, totalPrice: tp, totalQuantity: tq, basketItems: bi };
+      return { orderId: orderRef.id, invoiceNo: nextInvoiceNo, totalPrice: tp, totalQuantity: tq, basketItems: bi };
     });
     orderId = result.orderId;
+    orderInvoiceNo = result.invoiceNo;
     totalPrice = result.totalPrice;
     totalQuantity = result.totalQuantity;
     basketItems = result.basketItems;
@@ -167,7 +176,7 @@ export async function handleConfirmOrder(chatId: number): Promise<void> {
     }).catch((e) => console.error('stockMovement log failed:', e));
   }
 
-  const orderRef = { id: orderId };
+  const orderRef = { id: orderId, invoiceNo: orderInvoiceNo };
   const summaryItems = items.map((i) => ({ title: i.title, quantity: i.quantity }));
 
   // Confirmation to the customer + new-order alert to the admin run in
@@ -180,6 +189,7 @@ export async function handleConfirmOrder(chatId: number): Promise<void> {
         adminChatId,
         formatNewOrderAlert({
           id: orderRef.id,
+          invoiceNo: orderRef.invoiceNo,
           clientName: profile.name || '',
           clientPhone: profile.phone || '',
           totalPrice,
@@ -194,6 +204,7 @@ export async function handleConfirmOrder(chatId: number): Promise<void> {
       chatId,
       formatOrderNotification({
         id: orderRef.id,
+        invoiceNo: orderRef.invoiceNo,
         clientName: profile.name || '',
         totalPrice,
         totalQuantity,

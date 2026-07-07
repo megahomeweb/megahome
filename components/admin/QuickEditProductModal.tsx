@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { X } from "lucide-react";
 import useProductStore from "@/store/useProductStore";
 import { formatUZS } from "@/lib/formatPrice";
+import { toWholeMoney } from "@/lib/money";
 import toast from "react-hot-toast";
 import type { ProductT } from "@/lib/types";
 
@@ -29,7 +30,14 @@ export default function QuickEditProductModal({ product, onClose }: QuickEditPro
     if (Number(price) <= 0) { toast.error("Narx 0 dan katta bo'lishi kerak"); return; }
     setLoading(true);
     try {
-      await updateProduct(product.id, { ...product, title: title.trim(), price: String(price), costPrice, stock });
+      // Whole-dollar policy: normalize price/cost to integers on save.
+      await updateProduct(product.id, {
+        ...product,
+        title: title.trim(),
+        price: String(toWholeMoney(price)),
+        costPrice: toWholeMoney(costPrice),
+        stock,
+      });
       toast.success("Mahsulot yangilandi");
       onClose();
     } catch {

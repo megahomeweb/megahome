@@ -2,13 +2,14 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { doc, getDoc } from 'firebase/firestore';
-import { fireDB } from '@/firebase/config';
+import { fireDB, auth } from '@/firebase/config';
 import { Order } from '@/lib/types';
 import { formatUZS } from '@/lib/formatPrice';
 import { orderRevenue } from '@/lib/orderMath';
+import { displayOrderNo } from '@/lib/orderNumber';
 import { formatDateUz, formatTimeUz } from "@/lib/formatDate";
 import { getStatusInfo } from '@/lib/orderStatus';
-import { Printer, Share2, Copy, Link as LinkIcon, MapPin, Banknote } from 'lucide-react';
+import { Printer, Share2, Link as LinkIcon } from 'lucide-react';
 import { FaTelegram, FaWhatsapp } from 'react-icons/fa';
 import { Button } from '@/components/ui/button';
 import toast from 'react-hot-toast';
@@ -104,6 +105,11 @@ const InvoicePage = () => {
   useEffect(() => {
     const fetchOrder = async () => {
       try {
+        // Wait for Firebase Auth to restore the session first — on a hard
+        // page load (or a printed-link open) this effect runs before auth
+        // rehydrates, and an unauthenticated read is denied by the rules,
+        // which rendered "Buyurtma topilmadi" for a real order.
+        await auth.authStateReady();
         const orderDoc = await getDoc(doc(fireDB, 'orders', id));
         if (orderDoc.exists()) {
           setOrder({ id: orderDoc.id, ...orderDoc.data() } as Order);
@@ -146,27 +152,23 @@ const InvoicePage = () => {
 
   /* ---------- Computed values ---------- */
   const statusInfo = getStatusInfo(order.status);
-  const invoiceNumber = `MH-${order.id.slice(-6).toUpperCase()}`;
+  // Sequential document number (1, 2, 3 …) from the order-creation
+  // counter; legacy orders without one fall back to the id slice.
+  const invoiceNumber = displayOrderNo(order);
 
   const items = order.basketItems || [];
 
   const totalQuantity = order.totalQuantity;
-  // Use net total (after promo + ticket discount) when present so the
-  // invoice's "Profit" reflects what the customer actually paid, not the
-  // gross subtotal.
+  // Net total (after promo + ticket discount) — what the customer pays.
   const totalPrice = orderRevenue(order);
   const grossPrice = order.totalPrice;
-  const discountTotal = grossPrice - totalPrice;
+  const discountTotal = Math.max(0, grossPrice - totalPrice);
 
-  // Cost & profit (only if costPrice available on at least one item)
-  const hasCostData = items.some((item) => item.costPrice != null && item.costPrice > 0);
-  const totalCost = hasCostData
-    ? items.reduce((sum, item) => {
-        const cost = item.costPrice ?? 0;
-        return sum + cost * item.quantity;
-      }, 0)
-    : 0;
-  const profit = totalPrice - totalCost;
+  // NOTE: cost (tan narx) and profit (foyda) are intentionally NOT
+  // computed or rendered here. The schyot-faktura is a customer-facing
+  // document (printed, PDF'd, shared via Telegram/WhatsApp) — internal
+  // margins must never appear on it. Profit lives on /admin/reports and
+  // the dashboard only.
 
   const invoiceUrl = typeof window !== "undefined" ? window.location.href : "";
   const invoiceShareText = `Schyot-faktura ${invoiceNumber} | ${order.clientName} | ${formatUZS(totalPrice)} | MegaHome Ulgurji`;
@@ -356,26 +358,22 @@ const InvoicePage = () => {
               <span className="text-gray-500">Jami mahsulotlar:</span>
               <span className="font-bold text-gray-900 w-40 text-right">{totalQuantity} ta</span>
             </div>
+            {discountTotal > 0 && (
+              <>
+                <div className="flex items-center gap-8 text-sm">
+                  <span className="text-gray-500">Oraliq summa:</span>
+                  <span className="font-bold text-gray-900 w-40 text-right">{formatUZS(grossPrice)}</span>
+                </div>
+                <div className="flex items-center gap-8 text-sm">
+                  <span className="text-gray-500">Chegirma:</span>
+                  <span className="font-bold text-red-600 w-40 text-right">−{formatUZS(discountTotal)}</span>
+                </div>
+              </>
+            )}
             <div className="flex items-center gap-8 text-lg mt-1">
               <span className="font-semibold text-gray-700">Jami summa:</span>
               <span className="font-black text-gray-900 w-40 text-right">{formatUZS(totalPrice)}</span>
             </div>
-
-            {hasCostData && (
-              <>
-                <div className="w-full max-w-xs border-t border-dashed border-gray-300 my-2" />
-                <div className="flex items-center gap-8 text-sm">
-                  <span className="text-gray-500">Tan narxi:</span>
-                  <span className="font-bold text-gray-900 w-40 text-right">{formatUZS(totalCost)}</span>
-                </div>
-                <div className="flex items-center gap-8 text-sm">
-                  <span className="text-gray-500">Foyda:</span>
-                  <span className={`font-bold w-40 text-right ${profit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                    {formatUZS(profit)}
-                  </span>
-                </div>
-              </>
-            )}
           </div>
         </div>
 

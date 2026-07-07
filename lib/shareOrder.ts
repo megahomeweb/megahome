@@ -1,4 +1,5 @@
 import { formatUZS } from './formatPrice';
+import { formatOrderNo } from './orderNumber';
 
 interface ShareableOrderItem {
   title: string;
@@ -8,6 +9,7 @@ interface ShareableOrderItem {
 
 interface ShareableOrder {
   id: string;
+  invoiceNo?: number;
   clientName: string;
   clientPhone?: string;
   totalPrice: number;
@@ -23,7 +25,7 @@ interface ShareableOrder {
  */
 export function formatOrderForShare(order: ShareableOrder): string {
   const header = [
-    `🧾 Buyurtma #${order.id.slice(-8).toUpperCase()}`,
+    `🧾 Buyurtma № ${formatOrderNo(order)}`,
     `👤 ${order.clientName}`,
     order.clientPhone ? `📞 ${order.clientPhone}` : '',
   ].filter(Boolean).join('\n');
@@ -83,7 +85,7 @@ export async function shareOrderNative(order: ShareableOrder): Promise<void> {
   const nav = typeof navigator === 'undefined' ? null : navigator as Navigator & { share?: (data: ShareData) => Promise<void> };
   if (nav?.share) {
     try {
-      await nav.share({ title: `Buyurtma #${order.id.slice(-8).toUpperCase()}`, text });
+      await nav.share({ title: `Buyurtma № ${formatOrderNo(order)}`, text });
       return;
     } catch {
       // user cancelled or share failed — fall through to WhatsApp

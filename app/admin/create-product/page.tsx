@@ -10,6 +10,7 @@ import { CgClose } from 'react-icons/cg';
 import { ImagePlus, Loader2 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CategoryI, ImageT } from '@/lib/types';
+import { toWholeMoney } from '@/lib/money';
 import { sanitizeFilename } from '@/lib/sanitizeFilename';
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { FirebaseError } from 'firebase/app';
@@ -209,7 +210,13 @@ const AddProduct = () => {
     setLoading(true);
     try {
       const productRef = collection(fireDB, "products");
-      await addDoc(productRef, product);
+      // Whole-dollar policy: prices/costs persist as integers (34, 45 —
+      // never 34.57), so margins and reports stay in exact dollars.
+      await addDoc(productRef, {
+        ...product,
+        price: String(toWholeMoney(product.price)),
+        costPrice: toWholeMoney(product.costPrice ?? 0),
+      });
       toast.success("Mahsulot qo'shildi");
       removeProductDraft();
       navigate.push("/admin/products");
