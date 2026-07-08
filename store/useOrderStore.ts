@@ -54,6 +54,8 @@ export interface CreateOrderInput {
   source?: 'pos' | 'web' | 'admin' | 'telegram';
   /** Customer-entered promo code; server validates + applies atomically. */
   promoCode?: string;
+  /** Paper delivery-sheet sequence №. REQUIRED by the server for POS sales. */
+  deliverySheetNo?: string;
 }
 
 export interface CreateOrderResult {
@@ -133,6 +135,7 @@ export const useOrderStore = create<StoreState>((set, get) => ({
           ticketDiscount: input.ticketDiscount,
           source: input.source,
           promoCode: input.promoCode,
+          deliverySheetNo: input.deliverySheetNo,
         }),
       });
 

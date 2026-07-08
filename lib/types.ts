@@ -83,6 +83,12 @@ export interface Order {
   discountAmount?: number;
   promoCode?: string;
   promoDiscountAmount?: number;
+  /**
+   * Paper delivery-sheet (yetkazish varaqasi) sequence №. Business rule:
+   * a POS sale cannot be finalized without it — enforced client-side in
+   * PosScreen and server-side in /api/orders/create for source 'pos'.
+   */
+  deliverySheetNo?: string;
 }
 
 // Promo / discount code — admins create from /admin/promo, customers redeem

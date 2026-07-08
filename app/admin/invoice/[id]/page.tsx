@@ -281,7 +281,7 @@ const InvoicePage = () => {
           className="flex items-center justify-between px-8 py-3 bg-gray-50 border-b border-gray-200"
           style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}
         >
-          <div className="flex items-center gap-6 text-sm text-gray-600">
+          <div className="flex items-center gap-6 text-sm text-gray-600 flex-wrap">
             <p>
               <span className="font-semibold">Sana:</span>{' '}
               {formatDateUz(order.date)}
@@ -290,6 +290,12 @@ const InvoicePage = () => {
               <span className="font-semibold">Vaqt:</span>{' '}
               {formatTimeUz(order.date)}
             </p>
+            {order.deliverySheetNo && (
+              <p>
+                <span className="font-semibold">Yetkazish varaqasi:</span>{' '}
+                № {order.deliverySheetNo}
+              </p>
+            )}
           </div>
           <span
             className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold ${statusInfo.color} ${statusInfo.bg}`}

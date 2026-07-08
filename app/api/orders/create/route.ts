@@ -71,6 +71,12 @@ interface RequestBody {
   // totalUsed counters increment in the same write so we never overshoot
   // maxUsesTotal or maxUsesPerUser under concurrent redemptions.
   promoCode?: string;
+  /**
+   * Paper delivery-sheet (yetkazish varaqasi) sequence №. REQUIRED for
+   * POS sales — the shop's control that no goods leave the warehouse
+   * without a numbered physical document. Optional for web/telegram.
+   */
+  deliverySheetNo?: string;
 }
 
 interface OrderBasketItem {
@@ -195,7 +201,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
     }
 
-    const { items, clientName, clientPhone, deliveryAddress, orderNote, paymentMethod, targetUserUid, paymentBreakdown, ticketDiscount, source, promoCode } = body;
+    const { items, clientName, clientPhone, deliveryAddress, orderNote, paymentMethod, targetUserUid, paymentBreakdown, ticketDiscount, source, promoCode, deliverySheetNo } = body;
     const promoCodeNormalized = typeof promoCode === 'string' ? promoCode.trim().toUpperCase() : '';
 
     if (!Array.isArray(items) || items.length === 0) {
@@ -277,6 +283,17 @@ export async function POST(req: NextRequest) {
       source === 'pos' || source === 'web' || source === 'admin' || source === 'telegram'
         ? source
         : 'web';
+
+    // ── Yetkazish varaqasi № — REQUIRED for POS sales ──
+    // Business rule: no numbered paper delivery sheet, no sale. Enforced
+    // server-side so a stale/modified client cannot skip it.
+    const sheetNo = typeof deliverySheetNo === 'string' ? deliverySheetNo.trim().slice(0, 32) : '';
+    if (validatedSource === 'pos' && !sheetNo) {
+      return NextResponse.json(
+        { error: 'Yetkazish varaqasi raqami kiritilmadi — usiz sotuv yakunlanmaydi' },
+        { status: 400 },
+      );
+    }
 
     // ── Pre-resolve the promo code doc id (transactions can't run queries) ──
     let promoCodeRefId: string | null = null;
@@ -644,6 +661,7 @@ export async function POST(req: NextRequest) {
           discountAmount,
           netTotal,
           ...(deliveryAddress?.trim() ? { deliveryAddress: deliveryAddress.trim() } : {}),
+          ...(sheetNo ? { deliverySheetNo: sheetNo } : {}),
           ...(orderNote?.trim() ? { orderNote: orderNote.trim() } : {}),
           ...(resolvedPaymentMethod ? { paymentMethod: resolvedPaymentMethod } : {}),
           ...(breakdownForOrder ? { paymentBreakdown: breakdownForOrder } : {}),

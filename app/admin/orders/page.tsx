@@ -100,6 +100,8 @@ const Orders = () => {
         // Sequential № — operators search for the number printed on the
         // schyot-faktura ("12"), possibly with the № prefix.
         if (String(o.invoiceNo ?? '').includes(q.replace(/^№\s*/, ''))) return true;
+        // Yetkazish varaqasi № — find the sale by its paper sheet number.
+        if (o.deliverySheetNo && o.deliverySheetNo.toLowerCase().includes(q.replace(/^№\s*/, ''))) return true;
         if (o.clientPhone) {
           if (qPhoneCanon && canonicalPhone(o.clientPhone).includes(qPhoneCanon)) return true;
           if (o.clientPhone.includes(search)) return true;
@@ -474,6 +476,12 @@ const Orders = () => {
                       </div>
                       {/* Financials — 2-col grid on mobile, inline on desktop */}
                       <div className="grid grid-cols-2 sm:flex sm:items-center sm:gap-4 sm:justify-end mt-2 pt-2 border-t border-gray-100 gap-x-3 gap-y-1.5 text-right">
+                        {order.deliverySheetNo && (
+                          <div>
+                            <p className="text-[10px] text-gray-400 uppercase">Varaqa</p>
+                            <p className="text-xs sm:text-sm font-bold text-gray-700 tabular-nums">№ {order.deliverySheetNo}</p>
+                          </div>
+                        )}
                         <div>
                           <p className="text-[10px] text-gray-400 uppercase">Jami</p>
                           <p className="text-xs font-bold text-gray-700">{order.totalQuantity} ta</p>

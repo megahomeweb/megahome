@@ -99,6 +99,7 @@ type Stage = "shopping" | "tender" | "success";
 interface SuccessInfo {
   orderId: string;
   invoiceNo?: number;
+  deliverySheetNo?: string;
   total: number;
   netTotal: number;
   cashGiven: number;
@@ -135,6 +136,11 @@ export default function PosScreen() {
   const [customer, setCustomer] = useState<UserData | null>(null);
   const [responsible, setResponsible] = useState<UserData | null>(null);
   const [responsibleNote, setResponsibleNote] = useState<string>("");
+  // Yetkazish varaqasi tartib raqami — the pre-numbered paper delivery
+  // sheet that accompanies goods out of the warehouse. REQUIRED to
+  // finalize a sale (business rule): no varaqa №, no sale, so every
+  // ticket is traceable to a physical warehouse document.
+  const [deliverySheetNo, setDeliverySheetNo] = useState<string>("");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [discount, setDiscount] = useState<{ type: "pct" | "abs"; value: number }>({ type: "pct", value: 0 });
 
@@ -344,7 +350,12 @@ export default function PosScreen() {
   const customerBalance = customer ? balanceByUid.get(customer.uid) ?? 0 : 0;
 
   function canFinalize() {
-    return cart.length > 0 && validRowsCount > 0 && !submitting;
+    return (
+      cart.length > 0 &&
+      validRowsCount > 0 &&
+      deliverySheetNo.trim().length > 0 &&
+      !submitting
+    );
   }
 
   // ─────────────────────────────────────────────────────────
@@ -464,6 +475,7 @@ export default function PosScreen() {
     setCustomer(null);
     setDiscount({ type: "pct", value: 0 });
     setProductSearch("");
+    setDeliverySheetNo("");
     setStage("shopping");
     setCustomerSheetOpen(false);
     setSuccessInfo(null);
@@ -478,6 +490,13 @@ export default function PosScreen() {
       const validLines = cart.filter((l) => l.qty && l.qty > 0);
       if (validLines.length === 0) {
         toast.error("Hech qanday mahsulot tanlanmagan yoki miqdor noto'g'ri");
+        return;
+      }
+      // Business rule: no yetkazish varaqasi № — no sale. Guarded here
+      // too (not just canFinalize) so no code path can finalize without it.
+      const sheetNo = deliverySheetNo.trim();
+      if (!sheetNo) {
+        toast.error("Yetkazish varaqasi raqamini kiriting — usiz sotuv yakunlanmaydi");
         return;
       }
       if ((mode === "qarz" || mode === "muddatli") && !customer) {
@@ -543,6 +562,7 @@ export default function PosScreen() {
             ? { type: "abs", value: aggregateDiscountAbs }
             : undefined,
           source: "pos",
+          deliverySheetNo: sheetNo,
           orderNote: combinedNote,
         });
 
@@ -561,6 +581,7 @@ export default function PosScreen() {
         setSuccessInfo({
           orderId: result.orderId,
           invoiceNo: result.invoiceNo,
+          deliverySheetNo: sheetNo,
           total: subtotal,
           netTotal,
           cashGiven: opts?.cashGiven ?? 0,
@@ -579,7 +600,7 @@ export default function PosScreen() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [cart, netTotal, customer, subtotal, discount, discountAmount, lineDiscountsTotal, createOrder, responsibleNote],
+    [cart, netTotal, customer, subtotal, discount, discountAmount, lineDiscountsTotal, createOrder, responsibleNote, deliverySheetNo],
   );
 
   // ─────────────────────────────────────────────────────────
@@ -648,6 +669,7 @@ export default function PosScreen() {
                 customerName: customer?.name ?? "Mijoz",
                 customerPhone: customer?.phone ?? "",
                 sellerName,
+                deliverySheetNo: deliverySheetNo.trim() || undefined,
                 items: valid.map((l) => ({
                   title: l.product.title,
                   qty: l.qty as number,
@@ -981,6 +1003,8 @@ export default function PosScreen() {
             discountAmount={discountAmount}
             discount={discount}
             onChangeDiscount={setDiscount}
+            deliverySheetNo={deliverySheetNo}
+            onDeliverySheetNoChange={setDeliverySheetNo}
             canFinalize={canFinalize()}
             submitting={submitting}
             cartLen={cart.length}
@@ -1380,6 +1404,8 @@ function RightPanel({
   discountAmount,
   discount,
   onChangeDiscount,
+  deliverySheetNo,
+  onDeliverySheetNoChange,
   canFinalize,
   submitting,
   cartLen,
@@ -1407,6 +1433,8 @@ function RightPanel({
   discountAmount: number;
   discount: { type: "pct" | "abs"; value: number };
   onChangeDiscount: (d: { type: "pct" | "abs"; value: number }) => void;
+  deliverySheetNo: string;
+  onDeliverySheetNoChange: (v: string) => void;
   canFinalize: boolean;
   submitting: boolean;
   cartLen: number;
@@ -1591,6 +1619,44 @@ function RightPanel({
 
       {/* Payment buttons */}
       <div className="px-3 sm:px-4 py-2 space-y-2 shrink-0 border-t border-gray-100">
+        {/* Yetkazish varaqasi № — REQUIRED before any payment. The paper
+            delivery sheet's sequence number ties the sale to the physical
+            warehouse document; without it the sale cannot be finalized. */}
+        <div
+          className={`rounded-xl border px-3 py-2 ${
+            deliverySheetNo.trim()
+              ? "bg-emerald-50/50 border-emerald-200"
+              : "bg-red-50/60 border-red-300"
+          }`}
+        >
+          <label htmlFor="pos-delivery-sheet-no" className="flex items-center justify-between mb-1">
+            <span className={`text-xs font-bold ${deliverySheetNo.trim() ? "text-emerald-800" : "text-red-700"}`}>
+              Yetkazish varaqasi № <span aria-hidden>*</span>
+            </span>
+            {!deliverySheetNo.trim() && (
+              <span className="text-[10px] font-semibold text-red-600">Majburiy</span>
+            )}
+          </label>
+          <input
+            id="pos-delivery-sheet-no"
+            type="text"
+            inputMode="numeric"
+            maxLength={32}
+            placeholder="Varaqa tartib raqamini kiriting"
+            value={deliverySheetNo}
+            onChange={(e) => onDeliverySheetNoChange(e.target.value.replace(/[^0-9A-Za-z/-]/g, ""))}
+            className={`w-full h-9 px-3 rounded-lg border bg-white text-sm font-semibold tabular-nums outline-none transition ${
+              deliverySheetNo.trim()
+                ? "border-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                : "border-red-300 focus:border-red-400 focus:ring-2 focus:ring-red-100"
+            }`}
+          />
+          {!deliverySheetNo.trim() && (
+            <p className="text-[11px] text-red-600 mt-1">
+              Varaqa raqamisiz sotuv yakunlanmaydi
+            </p>
+          )}
+        </div>
         <div className="grid grid-cols-2 gap-2">
           <PayButton
             label="Naqd"
@@ -1833,6 +1899,7 @@ function printCartPreview(opts: {
   customerName: string;
   customerPhone: string;
   sellerName: string;
+  deliverySheetNo?: string;
   items: Array<{ title: string; qty: number; price: number; lineDiscount?: number; note?: string }>;
   subtotal: number;
   discountAmount: number;
@@ -1878,7 +1945,7 @@ function printCartPreview(opts: {
     <div class="meta">
       <strong>Chek (oldin ko'rish)</strong> · Sana: ${dateStr}<br>
       Mijoz: <strong>${opts.customerName}</strong>${opts.customerPhone ? ` · ${opts.customerPhone}` : ""}<br>
-      Sotuvchi: ${opts.sellerName}
+      Sotuvchi: ${opts.sellerName}${opts.deliverySheetNo ? `<br>Yetkazish varaqasi: <strong>№ ${escape(opts.deliverySheetNo)}</strong>` : ""}
     </div>
     <table>
       <thead><tr><th>#</th><th>Mahsulot</th><th>Soni</th><th style="text-align:right">Narx</th><th style="text-align:right">Jami</th></tr></thead>
@@ -2936,6 +3003,12 @@ function PosSuccess({
             <span className="text-sm text-gray-600">Mahsulotlar</span>
             <span className="text-sm font-semibold text-gray-900">{info.itemCount} dona</span>
           </div>
+          {info.deliverySheetNo && (
+            <div className="flex justify-between">
+              <span className="text-sm text-gray-600">Yetkazish varaqasi</span>
+              <span className="text-sm font-semibold text-gray-900 tabular-nums">№ {info.deliverySheetNo}</span>
+            </div>
+          )}
           <div className="flex justify-between">
             <span className="text-sm text-gray-600">To&apos;lov turi</span>
             <span className="text-xs font-bold uppercase rounded-md px-2 py-0.5 bg-blue-100 text-blue-700">
