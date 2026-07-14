@@ -2,9 +2,11 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import PanelTitle from '@/components/admin/PanelTitle';
 import { useOrderStore } from '@/store/useOrderStore';
+import { useExpenseStore } from '@/store/useExpenseStore';
 import { formatUZS } from '@/lib/formatPrice';
 import { isCompletedSale, orderRevenue, orderCost } from '@/lib/orderMath';
-import { TrendingUp, TrendingDown, DollarSign, ShoppingCart, BarChart3 } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, ShoppingCart, BarChart3, Wallet } from 'lucide-react';
+import Link from 'next/link';
 import RevenueChart from '@/components/admin/charts/RevenueChart';
 import DailyOrdersChart from '@/components/admin/charts/DailyOrdersChart';
 import ClearReportsPanel from '@/components/admin/ClearReportsPanel';
@@ -13,9 +15,11 @@ type Period = 'today' | 'week' | 'month' | 'all';
 
 const ReportsPage = () => {
   const { orders, fetchAllOrders, loadingOrders } = useOrderStore();
+  const { expenses, fetchExpenses } = useExpenseStore();
   const [period, setPeriod] = useState<Period>('today');
 
   useEffect(() => { fetchAllOrders(); }, [fetchAllOrders]);
+  useEffect(() => { fetchExpenses(); }, [fetchExpenses]);
 
   const getStartDate = (p: Period): Date => {
     const now = new Date();
@@ -85,7 +89,17 @@ const ReportsPage = () => {
       }
     }
 
-    const totalProfit = totalRevenue - totalCost;
+    // C — xarajatlar (rasxod) in the same period, from /admin/xarajatlar.
+    let totalExpenses = 0;
+    for (const e of expenses) {
+      const ms = e.date?.seconds ? e.date.seconds * 1000 : 0;
+      if (ms >= startMs) totalExpenses += e.amount || 0;
+    }
+
+    // The P&L chain the owner thinks in:
+    //   A savdo aylanmasi (tovar oborot) − B tan narxi − C xarajat = D sof foyda (daromad)
+    const grossProfit = totalRevenue - totalCost;          // A − B (yalpi foyda)
+    const totalProfit = grossProfit - totalExpenses;       // D = A − B − C
     const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
     const allProducts = Object.values(productProfitMap)
       .map((p) => ({ ...p, profit: p.revenue - p.cost, margin: p.revenue > 0 ? ((p.revenue - p.cost) / p.revenue) * 100 : 0 }));
@@ -103,10 +117,10 @@ const ReportsPage = () => {
       deliveredCount: completedCount,
       cancelledCount,
       pendingCount,
-      totalRevenue, totalCost, totalProfit, profitMargin,
+      totalRevenue, totalCost, totalExpenses, grossProfit, totalProfit, profitMargin,
       totalItems, topProducts, lossProducts,
     };
-  }, [orders, period]);
+  }, [orders, expenses, period]);
 
   const periods: { value: Period; label: string }[] = [
     { value: 'today', label: 'Bugun' },
@@ -136,8 +150,8 @@ const ReportsPage = () => {
           ))}
         </div>
 
-        {/* Summary cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 mb-6">
+        {/* Summary cards — the P&L chain: A − B − C = D */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-4 mb-4">
           <div className="bg-white rounded-xl border border-gray-200 p-3 sm:p-4">
             <div className="flex items-center gap-2 mb-1">
               <ShoppingCart className="size-4 text-blue-600" />
@@ -154,10 +168,10 @@ const ReportsPage = () => {
           <div className="bg-white rounded-xl border border-gray-200 p-3 sm:p-4">
             <div className="flex items-center gap-2 mb-1">
               <TrendingUp className="size-4 text-green-600" />
-              <p className="text-xs text-gray-500 uppercase font-semibold">Daromad</p>
+              <p className="text-xs text-gray-500 uppercase font-semibold">Savdo aylanmasi</p>
             </div>
             <p className="text-2xl font-bold text-green-600">{formatUZS(stats.totalRevenue)}</p>
-            <p className="text-[11px] text-gray-400 mt-1">{stats.totalItems} ta mahsulot sotildi</p>
+            <p className="text-[11px] text-gray-400 mt-1">A · tovar oborot · {stats.totalItems} ta sotildi</p>
           </div>
 
           <div className="bg-white rounded-xl border border-gray-200 p-3 sm:p-4">
@@ -166,19 +180,43 @@ const ReportsPage = () => {
               <p className="text-xs text-gray-500 uppercase font-semibold">Tan narxi</p>
             </div>
             <p className="text-2xl font-bold text-gray-500">{formatUZS(stats.totalCost)}</p>
-            <p className="text-[11px] text-gray-400 mt-1">Yetkazilgan buyurtmalardan</p>
+            <p className="text-[11px] text-gray-400 mt-1">B · sotilgan mahsulotlar</p>
           </div>
+
+          <Link href="/admin/xarajatlar" className="bg-white rounded-xl border border-gray-200 p-3 sm:p-4 hover:border-gray-300 transition-colors">
+            <div className="flex items-center gap-2 mb-1">
+              <Wallet className="size-4 text-red-500" />
+              <p className="text-xs text-gray-500 uppercase font-semibold">Xarajat</p>
+            </div>
+            <p className="text-2xl font-bold text-red-500">{formatUZS(stats.totalExpenses)}</p>
+            <p className="text-[11px] text-gray-400 mt-1">C · rasxod → boshqarish</p>
+          </Link>
 
           <div className={`bg-white rounded-xl border p-3 sm:p-4 ${stats.totalProfit < 0 ? 'border-red-300 bg-red-50/30' : 'border-gray-200'}`}>
             <div className="flex items-center gap-2 mb-1">
               <DollarSign className={`size-4 ${stats.totalProfit < 0 ? 'text-red-600' : 'text-amber-600'}`} />
-              <p className="text-xs text-gray-500 uppercase font-semibold">Sof foyda</p>
+              <p className="text-xs text-gray-500 uppercase font-semibold">Daromad (sof foyda)</p>
             </div>
             <p className={`text-2xl font-bold ${stats.totalProfit >= 0 ? 'text-amber-600' : 'text-red-600'}`}>
               {formatUZS(stats.totalProfit)}
             </p>
-            <p className="text-[11px] text-gray-400 mt-1">Marja: {stats.profitMargin.toFixed(1)}%</p>
+            <p className="text-[11px] text-gray-400 mt-1">D = A − B − C · Marja: {stats.profitMargin.toFixed(1)}%</p>
           </div>
+        </div>
+
+        {/* The formula, spelled out with live numbers so the math is never a mystery */}
+        <div className="bg-gray-50 border border-gray-200 rounded-xl px-3 sm:px-4 py-2.5 mb-6 text-[11px] sm:text-xs text-gray-600 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+          <span className="font-semibold text-green-700">{formatUZS(stats.totalRevenue)}</span>
+          <span className="text-gray-400">(A savdo aylanmasi)</span>
+          <span>−</span>
+          <span className="font-semibold text-gray-700">{formatUZS(stats.totalCost)}</span>
+          <span className="text-gray-400">(B tan narxi)</span>
+          <span>−</span>
+          <span className="font-semibold text-red-600">{formatUZS(stats.totalExpenses)}</span>
+          <span className="text-gray-400">(C xarajat)</span>
+          <span>=</span>
+          <span className={`font-bold ${stats.totalProfit >= 0 ? 'text-amber-600' : 'text-red-600'}`}>{formatUZS(stats.totalProfit)}</span>
+          <span className="text-gray-400">(D daromad — sof foyda)</span>
         </div>
 
         {/* Charts */}
@@ -187,11 +225,11 @@ const ReportsPage = () => {
             <div className="flex items-center justify-between mb-3 gap-2">
               <div className="flex items-center gap-2 min-w-0">
                 <TrendingUp className="size-4 text-emerald-600 shrink-0" />
-                <h3 className="text-sm font-bold text-gray-900 truncate">Daromad tendensiyasi</h3>
+                <h3 className="text-sm font-bold text-gray-900 truncate">Savdo aylanmasi tendensiyasi</h3>
               </div>
               <div className="flex items-center gap-2 sm:gap-3 text-[10px] shrink-0">
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Daromad</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Foyda</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Savdo aylanmasi</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Yalpi foyda</span>
               </div>
             </div>
             <RevenueChart orders={orders} days={period === 'today' ? 1 : period === 'week' ? 7 : period === 'month' ? 30 : 90} />
@@ -236,7 +274,7 @@ const ReportsPage = () => {
                     <th className="text-left px-4 py-2 font-medium text-red-800">#</th>
                     <th className="text-left px-4 py-2 font-medium text-red-800">Mahsulot</th>
                     <th className="text-right px-4 py-2 font-medium text-red-800">Sotildi</th>
-                    <th className="text-right px-4 py-2 font-medium text-red-800">Daromad</th>
+                    <th className="text-right px-4 py-2 font-medium text-red-800">Savdo</th>
                     <th className="text-right px-4 py-2 font-medium text-red-800">Tan narxi</th>
                     <th className="text-right px-4 py-2 font-medium text-red-800">Zarar</th>
                   </tr>
@@ -274,7 +312,7 @@ const ReportsPage = () => {
                       <p className="font-semibold text-gray-700">{p.qty} ta</p>
                     </div>
                     <div>
-                      <p className="text-red-400">Daromad</p>
+                      <p className="text-red-400">Savdo</p>
                       <p className="font-semibold text-gray-700 tabular-nums">{formatUZS(p.revenue)}</p>
                     </div>
                     <div>
@@ -306,7 +344,7 @@ const ReportsPage = () => {
                       <th className="text-left px-4 py-2 font-medium">#</th>
                       <th className="text-left px-4 py-2 font-medium">Mahsulot</th>
                       <th className="text-right px-4 py-2 font-medium">Sotildi</th>
-                      <th className="text-right px-4 py-2 font-medium">Daromad</th>
+                      <th className="text-right px-4 py-2 font-medium">Savdo</th>
                       <th className="text-right px-4 py-2 font-medium">Tan narxi</th>
                       <th className="text-right px-4 py-2 font-medium">Foyda</th>
                       <th className="text-right px-4 py-2 font-medium">Marja</th>
@@ -355,7 +393,7 @@ const ReportsPage = () => {
                           <p className="font-semibold text-gray-700">{p.qty} ta</p>
                         </div>
                         <div>
-                          <p className="text-gray-400">Daromad</p>
+                          <p className="text-gray-400">Savdo</p>
                           <p className="font-semibold text-green-700 tabular-nums">{formatUZS(p.revenue)}</p>
                         </div>
                         <div>

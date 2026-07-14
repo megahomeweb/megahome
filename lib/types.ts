@@ -137,6 +137,20 @@ export interface NasiyaEntry {
   note?: string;
 }
 
+// Biznes xarajati (rasxod) — rent, salary, transport, ads… NOT cost of goods
+// (that's costPrice on order lines). Feeds the P&L chain on /admin/reports:
+//   A savdo aylanmasi − B tan narxi − C xarajat = D sof foyda (daromad).
+// Amounts follow the WHOLE-DOLLAR policy (integer USD via toWholeMoney).
+export interface Expense {
+  id: string;
+  title: string;
+  amount: number;      // integer USD
+  category: string;    // Ijara | Maosh | Transport | Kommunal | Reklama | Boshqa
+  note?: string;
+  date: Timestamp;     // when the expense occurred (picker on the form)
+  createdAt: Timestamp;
+}
+
 export interface StockReceiptItem {
   productId: string;
   productTitle: string;

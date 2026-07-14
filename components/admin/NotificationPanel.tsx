@@ -442,7 +442,7 @@ const SummaryDetails = ({ data }: { data: NonNullable<Notification["summaryData"
             <TrendingUp className="size-3.5 text-emerald-600" />
           </div>
           <p className="text-sm font-bold text-emerald-600">{formatUZS(data.revenue)}</p>
-          <p className="text-[10px] text-gray-500 uppercase">Daromad</p>
+          <p className="text-[10px] text-gray-500 uppercase">Savdo aylanmasi</p>
         </div>
         <div className="px-3 py-3 text-center">
           <div className="flex items-center justify-center size-7 rounded-full bg-amber-100 mx-auto mb-1">

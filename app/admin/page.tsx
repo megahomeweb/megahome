@@ -38,11 +38,11 @@ const Dashboard = () => {
           <div className="flex items-center justify-between mb-3 gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <TrendingUp className="size-4 text-emerald-600 shrink-0" />
-              <h3 className="text-sm font-bold text-gray-900 truncate">Daromad va foyda</h3>
+              <h3 className="text-sm font-bold text-gray-900 truncate">Savdo aylanmasi va foyda</h3>
             </div>
             <div className="flex items-center gap-2 sm:gap-3 text-[10px] shrink-0">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Daromad</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Foyda</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Savdo aylanmasi</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Yalpi foyda</span>
             </div>
           </div>
           <RevenueChart orders={orders} days={14} />

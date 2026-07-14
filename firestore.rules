@@ -109,6 +109,14 @@ service cloud.firestore {
       allow create: if isAdmin();
     }
 
+    // Xarajatlar (business expenses / rasxod) — staff read (reports show C in
+    // the A−B−C=D P&L chain), admin writes. Amount must be a number.
+    match /expenses/{expenseId} {
+      allow read: if isStaff();
+      allow create: if isAdmin() && request.resource.data.amount is number;
+      allow update, delete: if isAdmin();
+    }
+
     // Invoices — admin only
     match /invoices/{invoiceId} {
       allow read, write: if isAdmin();

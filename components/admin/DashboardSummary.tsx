@@ -1,5 +1,5 @@
 "use client";
-import { ShoppingCart, UserPlus, TrendingUp, TrendingDown, Package, AlertTriangle, DollarSign, HandCoins, Info } from "lucide-react";
+import { ShoppingCart, UserPlus, TrendingUp, TrendingDown, Package, AlertTriangle, DollarSign, HandCoins, Info, Wallet } from "lucide-react";
 import { useNotificationStore } from "@/store/useNotificationStore";
 import { formatUZS } from "@/lib/formatPrice";
 import { summarizeOrders, isCompletedSale } from "@/lib/orderMath";
@@ -7,6 +7,7 @@ import Link from "next/link";
 import { ShineBorder } from "@/components/ui/shine-border";
 import useProductStore from "@/store/useProductStore";
 import { useOrderStore } from "@/store/useOrderStore";
+import { useExpenseStore } from "@/store/useExpenseStore";
 import { useEffect, useMemo } from "react";
 import { exportLowStockProducts } from "@/lib/exportExcel";
 import { useNasiyaTotal } from "@/hooks/useNasiyaTotal";
@@ -16,9 +17,11 @@ const DashboardSummary = () => {
   const { notifications } = useNotificationStore();
   const { products, loading: productsLoading, fetchProducts } = useProductStore();
   const { orders, fetchAllOrders } = useOrderStore();
+  const { expenses, fetchExpenses } = useExpenseStore();
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
   useEffect(() => { fetchAllOrders(); }, [fetchAllOrders]);
+  useEffect(() => { fetchExpenses(); }, [fetchExpenses]);
 
   // "Yangi" counts pulled from the orders/users themselves — single source
   // of truth. Previously this widget counted UNREAD NOTIFICATIONS
@@ -45,9 +48,17 @@ const DashboardSummary = () => {
   //   • includes POS sales (source='pos') as completed even at status 'yangi'
   //   • excludes 'bekor_qilindi'
   const totals = useMemo(() => summarizeOrders(orders), [orders]);
-  const totalRevenue = totals.revenue;
-  const totalCost = totals.cost;
-  const totalProfit = totals.profit;
+  const totalRevenue = totals.revenue;   // A — savdo aylanmasi (tovar oborot)
+  const totalCost = totals.cost;         // B — tan narxi (sotilgan mahsulotlar)
+  // C — xarajatlar (rasxod), all-time to match summarizeOrders' scope.
+  const totalExpenses = useMemo(
+    () => expenses.reduce((s, e) => s + (e.amount || 0), 0),
+    [expenses]
+  );
+  // D — daromad (sof foyda) = A − B − C. The dashboard previously showed
+  // profit BEFORE expenses; with the Xarajatlar section it's a true P&L.
+  const totalProfit = totals.profit - totalExpenses;
+  const netMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
 
   // Outstanding nasiya — REAL balance from the /nasiya collection (server
   // maintains `remaining` as customers pay), NOT the order-snapshot sum
@@ -109,7 +120,7 @@ const DashboardSummary = () => {
               Mahsulot katalogi bo&apos;sh, lekin sotuv tarixi ko&apos;rinmoqda
             </p>
             <p className="text-[11px] sm:text-xs text-red-800 mt-0.5 leading-snug">
-              Daromad va sof foyda eski buyurtmalardan hisoblanyapti.
+              Savdo aylanmasi va sof foyda eski buyurtmalardan hisoblanyapti.
               Hisobotlarni 0 ga tushirish uchun{" "}
               <Link href="/admin/profile" className="underline font-semibold whitespace-nowrap">
                 Profil → To&apos;liq factory reset →
@@ -222,14 +233,13 @@ const DashboardSummary = () => {
         </ShineBorder>
       </Link>
 
-      {/* ═══ Financial trio: Daromad − Tan narxi = Sof foyda ═══════ */}
-      {/* The three cards below tell one connected story. Daromad is what
-          came IN, Tan narxi is what was paid OUT for the goods, and Sof foyda
-          is the difference. Operators previously saw only Daromad + Sof foyda
-          and the math wasn't transparent — adding Tan narxi makes it
-          obvious where the money goes. */}
+      {/* ═══ P&L chain: A savdo aylanmasi − B tan narxi − C xarajat = D sof foyda ═══ */}
+      {/* Four cards, one connected story. Savdo aylanmasi (tovar oborot) is
+          what came IN, Tan narxi is what the sold goods cost, Xarajat is the
+          running costs (rent/salary/…), and Sof foyda (daromad) is what's
+          left: A − B − C = D. */}
 
-      {/* Daromad (Revenue) */}
+      {/* A — Savdo aylanmasi (turnover) */}
       <Link href="/admin/reports">
         <ShineBorder
           color={totalRevenue > 0 ? ["#10b981", "#059669", "#34d399"] : ["#e5e7eb"]}
@@ -240,7 +250,7 @@ const DashboardSummary = () => {
           <div className="relative overflow-hidden w-full rounded-xl p-2 sm:p-4 min-w-0">
             <div className="flex items-start justify-between gap-1 sm:gap-2">
               <div className="min-w-0">
-                <p className="text-[11px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Daromad</p>
+                <p className="text-[11px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Savdo aylanmasi</p>
                 <p className={`text-sm sm:text-2xl font-bold mt-0.5 sm:mt-1 tabular-nums truncate ${totalRevenue > 0 ? "text-green-600" : "text-gray-400"}`}>
                   {totalRevenue > 0 ? formatUZS(totalRevenue) : '0$'}
                 </p>
@@ -256,7 +266,7 @@ const DashboardSummary = () => {
         </ShineBorder>
       </Link>
 
-      {/* Tan narxi (Cost of goods sold) — the bridge that makes Daromad → Sof foyda math obvious */}
+      {/* B — Tan narxi (cost of goods sold) */}
       <ShineBorder
         color={["#94a3b8", "#64748b", "#cbd5e1"]}
         borderWidth={totalCost > 0 ? 2 : 1}
@@ -279,7 +289,32 @@ const DashboardSummary = () => {
         </div>
       </ShineBorder>
 
-      {/* Sof foyda (Net profit) = Daromad − Tan narxi */}
+      {/* C — Xarajat (rasxod) → /admin/xarajatlar */}
+      <Link href="/admin/xarajatlar">
+        <ShineBorder
+          color={totalExpenses > 0 ? ["#ef4444", "#f87171", "#dc2626"] : ["#e5e7eb"]}
+          borderWidth={totalExpenses > 0 ? 2 : 1}
+          duration={25}
+          className="hover:shadow-lg transition-shadow"
+        >
+          <div className="relative overflow-hidden w-full rounded-xl p-2 sm:p-4 min-w-0">
+            <div className="flex items-start justify-between gap-1 sm:gap-2">
+              <div className="min-w-0">
+                <p className="text-[11px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Xarajat</p>
+                <p className={`text-sm sm:text-2xl font-bold mt-0.5 sm:mt-1 tabular-nums truncate ${totalExpenses > 0 ? "text-red-500" : "text-gray-400"}`}>
+                  {totalExpenses > 0 ? formatUZS(totalExpenses) : '0$'}
+                </p>
+                <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">Ijara, maosh, rasxod…</p>
+              </div>
+              <div className={`flex items-center justify-center size-7 sm:size-11 rounded-lg sm:rounded-xl shrink-0 ${totalExpenses > 0 ? "bg-red-100" : "bg-gray-100"}`}>
+                <Wallet className={`size-3.5 sm:size-5 ${totalExpenses > 0 ? "text-red-500" : "text-gray-400"}`} />
+              </div>
+            </div>
+          </div>
+        </ShineBorder>
+      </Link>
+
+      {/* D — Sof foyda (daromad) = A − B − C */}
       <ShineBorder
         color={totalProfit > 0 ? ["#f59e0b", "#d97706", "#fbbf24"] : totalProfit < 0 ? ["#ef4444", "#dc2626"] : ["#e5e7eb"]}
         borderWidth={totalProfit !== 0 ? 2 : 1}
@@ -289,15 +324,15 @@ const DashboardSummary = () => {
         <div className="relative overflow-hidden w-full rounded-xl p-2 sm:p-4 min-w-0">
           <div className="flex items-start justify-between gap-1 sm:gap-2">
             <div className="min-w-0">
-              <p className="text-[11px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Sof foyda</p>
+              <p className="text-[11px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wider truncate">Sof foyda (daromad)</p>
               <p className={`text-sm sm:text-2xl font-bold mt-0.5 sm:mt-1 tabular-nums truncate ${totalProfit > 0 ? "text-amber-600" : totalProfit < 0 ? "text-red-600" : "text-gray-400"}`}>
                 {totalProfit !== 0 ? formatUZS(totalProfit) : '0$'}
               </p>
               <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">
                 {totalRevenue > 0 && totalProfit >= 0
-                  ? `Marja: ${totals.margin.toFixed(1)}%`
+                  ? `Savdo − tan narx − xarajat · ${netMargin.toFixed(1)}%`
                   : totalProfit < 0
-                    ? "Zarar — narxlarni tekshiring"
+                    ? "Zarar — narx va xarajatni tekshiring"
                     : totalCost > 0
                       ? "Sotilgan-yo'q"
                       : "Tan narxni kiriting"}

@@ -90,8 +90,8 @@ export default function RevenueChart({ orders, days = 14 }: RevenueChartProps) {
               return (
                 <div className="bg-white border border-gray-200 rounded-xl p-3 shadow-lg text-xs">
                   <p className="font-bold text-gray-900 mb-1">{label}</p>
-                  <p className="text-emerald-600">Daromad: {formatUZS(payload[0]?.value as number)}</p>
-                  <p className="text-amber-600">Foyda: {formatUZS(payload[1]?.value as number)}</p>
+                  <p className="text-emerald-600">Savdo aylanmasi: {formatUZS(payload[0]?.value as number)}</p>
+                  <p className="text-amber-600">Yalpi foyda: {formatUZS(payload[1]?.value as number)}</p>
                 </div>
               );
             }}

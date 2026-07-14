@@ -277,7 +277,7 @@ const ResetTestDataPanel = () => {
               Buyurtmalarni tozalash
             </h2>
             <p className="text-xs sm:text-sm text-amber-900/80 mt-0.5">
-              Hisobotlar, daromad, sof foyda — barchasi 0 ga tushadi.
+              Hisobotlar, savdo aylanmasi, sof foyda — barchasi 0 ga tushadi.
             </p>
           </div>
         </div>
