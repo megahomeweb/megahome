@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../ui/button';
 import { BiTrash, BiUser } from 'react-icons/bi';
-import { Phone, ShoppingCart, UserCheck } from 'lucide-react';
+import { Phone, ShoppingCart, UserCheck, KeyRound, Copy, X } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import type { UserData } from '@/store/authStore';
 import { useOrderStore } from '@/store/useOrderStore';
@@ -45,6 +45,9 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
   const { users, fetchAllUsers } = useAuthStore();
   const { orders } = useOrderStore();
   const [loadingUserId, setLoadingUserId] = useState<string | null>(null);
+  // Freshly generated temp password, shown exactly once in a modal. Held
+  // only in component state — it exists nowhere else in plaintext.
+  const [resetResult, setResetResult] = useState<{ name: string; password: string } | null>(null);
   const { isNewUser } = useNotificationStore();
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -141,6 +144,42 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
     }
   };
 
+  const handleResetPassword = async (user: UserData) => {
+    if (!window.confirm(
+      `${user.name} uchun yangi parol yaratilsinmi?\n\nEski parol ishlamay qoladi.`
+    )) return;
+    setLoadingUserId(user.uid);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) { toast.error("Avtorizatsiya xatosi"); return; }
+      const res = await fetch('/api/admin/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+        body: JSON.stringify({ uid: user.uid }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setResetResult({ name: user.name, password: data.password });
+      } else {
+        toast.error(data.error || "Parolni tiklashda xatolik");
+      }
+    } catch {
+      toast.error("Parolni tiklashda xatolik");
+    } finally {
+      setLoadingUserId(null);
+    }
+  };
+
+  const handleCopyPassword = async () => {
+    if (!resetResult) return;
+    try {
+      await navigator.clipboard.writeText(resetResult.password);
+      toast.success("Nusxalandi");
+    } catch {
+      toast.error("Nusxalab bo'lmadi");
+    }
+  };
+
   const handleRoleChange = async (user: UserData, newRole: string) => {
     if (newRole === user.role) return;
     // Confirm any role change — promoting to admin grants full panel access
@@ -196,7 +235,7 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
               <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Buyurtmalar</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Jami xarid</th>
               <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Maqom</th>
-              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase w-16"></th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase w-24"></th>
             </tr>
           </thead>
           <tbody>
@@ -284,8 +323,18 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
                     )}
                   </div>
                 </td>
-                {/* Delete */}
-                <td className="px-4 py-3 text-center">
+                {/* Reset password + Delete */}
+                <td className="px-4 py-3 text-center whitespace-nowrap">
+                  <Button
+                    onClick={() => handleResetPassword(user)}
+                    disabled={loadingUserId === user.uid}
+                    variant="ghost"
+                    size="sm"
+                    title="Yangi parol"
+                    className="text-gray-400 hover:text-blue-600 cursor-pointer"
+                  >
+                    <KeyRound className="size-4" />
+                  </Button>
                   <Button
                     onClick={() => handleDelete(user)}
                     disabled={loadingUserId === user.uid}
@@ -386,6 +435,16 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
                 ))}
               </select>
               <Button
+                onClick={() => handleResetPassword(user)}
+                disabled={loadingUserId === user.uid}
+                variant="ghost"
+                size="sm"
+                title="Yangi parol"
+                className="text-gray-400 hover:text-blue-600 cursor-pointer shrink-0"
+              >
+                <KeyRound className="size-4" />
+              </Button>
+              <Button
                 onClick={() => handleDelete(user)}
                 disabled={loadingUserId === user.uid}
                 variant="ghost"
@@ -408,6 +467,35 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
         onPageChange={setPage}
         onPerPageChange={setPerPage}
       />
+
+      {/* One-time temp password modal. Closing discards the password —
+          it can't be viewed again, only re-generated. */}
+      {resetResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setResetResult(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-bold text-gray-900">Yangi parol</h3>
+              <button onClick={() => setResetResult(null)} className="text-gray-400 hover:text-gray-600 cursor-pointer" aria-label="Yopish">
+                <X className="size-5" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mb-3">{resetResult.name}</p>
+            <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mb-3">
+              <span className="flex-1 font-mono text-xl font-bold tracking-widest text-gray-900 select-all">
+                {resetResult.password}
+              </span>
+              <button
+                onClick={handleCopyPassword}
+                className="shrink-0 inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg bg-gray-900 hover:bg-gray-800 text-white cursor-pointer transition-colors"
+              >
+                <Copy className="size-3.5" />
+                Nusxalash
+              </button>
+            </div>
+            <p className="text-xs text-amber-600 font-medium">Faqat hozir ko&apos;rinadi — mijozga ayting</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

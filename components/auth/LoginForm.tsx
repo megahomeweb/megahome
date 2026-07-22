@@ -8,6 +8,7 @@ import toast from 'react-hot-toast'
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
   type User as FirebaseUser,
 } from 'firebase/auth';
 import { auth, fireDB } from '@/firebase/config';
@@ -29,13 +30,29 @@ const LoginForm = () => {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-    reset
+    reset,
+    getValues
   } = useForm<LoginFormInputs>({
     defaultValues: {
       email: "",
       password: ""
     }
   })
+
+  // Self-service reset: emails a Firebase reset link to the typed email.
+  // Success is reported identically whether or not the account exists —
+  // no account-enumeration oracle.
+  const handleForgotPassword = async () => {
+    const email = getValues('email').trim()
+    if (!email) {
+      toast.error('Avval emailingizni kiriting')
+      return
+    }
+    try {
+      await sendPasswordResetEmail(auth, email)
+    } catch {}
+    toast.success('Havola emailga yuborildi')
+  }
 
   // === Hardcoded-admin login path ====================================
   // Sidesteps Firebase Admin SDK entirely (which is what was producing
@@ -285,6 +302,13 @@ const LoginForm = () => {
             {errors.password && (
               <span className="text-red-500 text-sm mt-1">{errors.password.message}</span>
             )}
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              className="self-end mt-2 text-sm text-[#6B6B6B] underline cursor-pointer hover:text-black transition-colors"
+            >
+              Parolni unutdingizmi?
+            </button>
           </label>
         </div>
         <div className="flex md:px-4 py-3">
