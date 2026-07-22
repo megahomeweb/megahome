@@ -18,7 +18,9 @@ const ProductItem = ({ id }: { id: string }) => {
   const { fetchSingleProduct, loading, product } = useProductStore();
   const { addToBasket, getItemQuantity, load, calculateTotals } = useCartProductStore();
   const [quantity, setQuantity] = useState(1);
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, canSeePrices, isProspect } = useAuthStore();
+  const showPrice = canSeePrices();
+  const prospect = isProspect();
   const [currentImg, setCurrentImg] = useState(0);
   const navigate = useRouter();
   const quantityInBasket = getItemQuantity(id);
@@ -59,6 +61,9 @@ const ProductItem = ({ id }: { id: string }) => {
   };
 
   const handleSubmit = async () => {
+    if (!showPrice) {
+      return toast.error(prospect ? "Tasdiqlash kutilmoqda" : "Iltimos, ro'yxatdan o'ting");
+    }
     if (hasStock && quantity > stock) {
       return toast.error(`Omborda faqat ${stock} ta mavjud`);
     }
@@ -173,7 +178,7 @@ const ProductItem = ({ id }: { id: string }) => {
 
         {/* Price */}
         <div className="bg-gray-50 rounded-2xl p-5 mb-6">
-          {isAuthenticated ? (
+          {showPrice ? (
             <div className="flex items-end justify-between">
               <div>
                 <p className="text-sm text-gray-500 mb-1">Narxi</p>
@@ -198,6 +203,11 @@ const ProductItem = ({ id }: { id: string }) => {
                   </span>
                 )
               )}
+            </div>
+          ) : prospect ? (
+            <div className="text-center py-2">
+              <p className="font-bold text-amber-600 mb-1">Tasdiqlash kutilmoqda</p>
+              <p className="text-sm text-gray-500">Narx tasdiqlangach ochiladi</p>
             </div>
           ) : (
             <div className="text-center py-2">
@@ -236,11 +246,13 @@ const ProductItem = ({ id }: { id: string }) => {
         {/* Add to cart button */}
         <Button
           onClick={handleSubmit}
-          disabled={loading || load || !isAuthenticated || (hasStock && stock <= 0)}
+          disabled={loading || load || !showPrice || (hasStock && stock <= 0)}
           className="w-full h-14 rounded-2xl bg-gray-900 hover:bg-gray-800 text-white text-base font-bold transition-all cursor-pointer disabled:opacity-50 gap-2.5"
         >
           {load ? (
             <span>Yuklanmoqda...</span>
+          ) : prospect ? (
+            <span>Tasdiqlash kutilmoqda</span>
           ) : !isAuthenticated ? (
             <span>Iltimos, ro&apos;yxatdan o&apos;ting</span>
           ) : (hasStock && stock <= 0) ? (

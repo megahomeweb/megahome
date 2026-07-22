@@ -6,7 +6,12 @@ import { auth, fireDB } from '@/firebase/config'
 import { collection, onSnapshot } from 'firebase/firestore'
 import { isAdminEmail } from '@/lib/admin-config'
 
-type Role = "admin" | "manager" | "user"
+// "prospect" = Ehtimoliy foydalanuvchi: signed up, but the admin hasn't
+// verified them yet. Prospects can browse the catalog but see no prices
+// and can't order — the admin calls them, makes the wholesale deal, then
+// promotes them to "user" from /admin/users. Legacy docs with no role
+// field are treated as approved "user" (they predate this workflow).
+type Role = "admin" | "manager" | "user" | "prospect"
 
 interface UserData {
   name: string
@@ -42,6 +47,8 @@ interface AuthState {
   logout: () => void
   isAdmin: () => boolean
   isManager: () => boolean
+  isProspect: () => boolean
+  canSeePrices: () => boolean
   hasAdminAccess: () => boolean
 }
 
@@ -211,6 +218,24 @@ export const useAuthStore = create<AuthState>()(
       isManager: () => {
         const { userData } = get()
         return userData?.role === 'manager'
+      },
+
+      isProspect: () => {
+        const { userData } = get()
+        return userData?.role === 'prospect'
+      },
+
+      // The ONE predicate for wholesale price visibility. True only for
+      // approved identities: admin (by email), manager, or approved user.
+      // Prospects and signed-out visitors get the catalog without prices.
+      // While the profile doc is still loading (user set, userData null)
+      // this returns false — components should render a neutral
+      // placeholder in that window, not the prospect messaging.
+      canSeePrices: () => {
+        const { user, userData } = get()
+        if (isAdminEmail(user?.email)) return true
+        if (!user || !userData) return false
+        return userData.role !== 'prospect'
       },
 
       hasAdminAccess: () => {

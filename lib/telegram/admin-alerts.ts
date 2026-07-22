@@ -42,15 +42,19 @@ export async function alertNewUser(userData: {
   const chatId = getAdminChatId();
   if (!chatId) return;
 
+  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'https://megahome.app').replace(/\/$/, '');
+
   try {
     await telegram.sendMessage(
       chatId,
       [
-        '👤 <b>Yangi foydalanuvchi ro\'yxatdan o\'tdi!</b>',
+        '👤 <b>Yangi ehtimoliy foydalanuvchi!</b>',
         '',
         `📛 Ism: <b>${userData.name}</b>`,
         `📧 Email: ${userData.email}`,
         `📞 Telefon: ${userData.phone}`,
+        '',
+        `✅ Tasdiqlash: ${siteUrl}/admin/users`,
       ].join('\n')
     );
   } catch (error) {

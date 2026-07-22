@@ -4,6 +4,7 @@ import { Share2, Link as LinkIcon } from "lucide-react";
 import { FaTelegram, FaWhatsapp } from "react-icons/fa";
 import { formatUZS } from "@/lib/formatPrice";
 import toast from "react-hot-toast";
+import { useAuthStore } from "@/store/authStore";
 
 interface ShareButtonProps {
   product: { title: string; price: string; id: string };
@@ -31,7 +32,14 @@ const ShareButton = ({ product, className = "" }: ShareButtonProps) => {
     ? `${window.location.origin}/product/${product.id}`
     : `/product/${product.id}`;
 
-  const productText = `${product.title} - ${formatUZS(Number(product.price))} | MegaHome Ulgurji`;
+  // Price goes into the share text only when the sharer is allowed to see
+  // it — otherwise a signed-out visitor (or unapproved prospect) could
+  // read the wholesale price straight out of the share sheet.
+  const { canSeePrices } = useAuthStore();
+  const showPrice = canSeePrices();
+  const productText = showPrice
+    ? `${product.title} - ${formatUZS(Number(product.price))} | MegaHome Ulgurji`
+    : `${product.title} | MegaHome Ulgurji`;
 
   const handleTelegram = (e: React.MouseEvent) => {
     e.preventDefault();

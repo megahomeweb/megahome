@@ -10,6 +10,25 @@ import { handleOrder, handleConfirmOrder, handleCancelOrder, handleReorder } fro
 import { handleMyOrders, handleOrderDetail } from './commands/myorders';
 import { formatHelp } from './formatter';
 import { mainMenuKeyboard } from './keyboards';
+import { requireApprovedAccess } from './access';
+
+// Every command/callback that exposes prices or ordering requires a
+// linked AND approved (non-prospect) account — enforced centrally here
+// so no individual handler can forget the check. /start, /help and
+// /settings stay open.
+const GUARDED_COMMANDS = new Set([
+  '/products', '/mahsulotlar',
+  '/order', '/buyurtma',
+  '/reorder', '/qayta',
+  '/myorders', '/buyurtmalarim',
+  '/cart', '/savatcha',
+]);
+const GUARDED_ACTIONS = new Set([
+  'category', 'product', 'page',
+  'cart_add', 'cart_remove', 'cart_qty', 'cart_clear',
+  'order_confirm', 'order_do_confirm', 'order_cancel', 'order_detail',
+]);
+const GUARDED_MENU_SECTIONS = new Set(['products', 'cart', 'myorders', 'reorder']);
 
 export async function handleUpdate(update: TelegramUpdate): Promise<void> {
   try {
@@ -29,6 +48,8 @@ async function handleCommand(message: TelegramMessage): Promise<void> {
   const chatId = message.chat.id;
   const text = (message.text || '').trim();
   const command = text.split(' ')[0].toLowerCase().replace(/@\w+$/, ''); // strip bot username
+
+  if (GUARDED_COMMANDS.has(command) && !(await requireApprovedAccess(chatId))) return;
 
   switch (command) {
     case '/start': {
@@ -81,7 +102,9 @@ async function handleCallback(query: TelegramCallbackQuery): Promise<void> {
   await Promise.all([ack, work]);
 }
 
-function dispatchCallback(chatId: number, action: string, params: string[]): Promise<void> | void {
+async function dispatchCallback(chatId: number, action: string, params: string[]): Promise<void> {
+  if (GUARDED_ACTIONS.has(action) && !(await requireApprovedAccess(chatId))) return;
+
   switch (action) {
     // Menu navigation
     case 'menu':
@@ -127,6 +150,8 @@ function dispatchCallback(chatId: number, action: string, params: string[]): Pro
 }
 
 async function handleMenuAction(chatId: number, section: string): Promise<void> {
+  if (GUARDED_MENU_SECTIONS.has(section) && !(await requireApprovedAccess(chatId))) return;
+
   switch (section) {
     case 'products': return handleProducts(chatId);
     case 'cart': return handleCart(chatId);
@@ -145,6 +170,7 @@ async function handleBackAction(chatId: number, target: string): Promise<void> {
       });
       break;
     case 'categories':
+      if (!(await requireApprovedAccess(chatId))) return;
       return handleProducts(chatId);
   }
 }

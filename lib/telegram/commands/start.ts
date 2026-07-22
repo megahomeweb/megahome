@@ -222,6 +222,16 @@ export async function handleContact(message: TelegramMessage): Promise<void> {
   await telegram.sendMessage(chatId, '✅ Hisobingiz muvaffaqiyatli ulandi!', {
     replyMarkup: removeKb,
   });
+  // Prospects don't get the catalog pitch — prices and ordering stay
+  // locked until the admin approves them (handlers.ts enforces it).
+  if (matchedUser.role === 'prospect') {
+    await telegram.sendMessage(
+      chatId,
+      "⏳ Hisobingiz hali tasdiqlanmagan. Tez orada qo'ng'iroq qilamiz.",
+      { replyMarkup: mainMenuKeyboard() }
+    );
+    return;
+  }
   await telegram.sendMessage(chatId, formatWelcome(matchedUser.name), {
     replyMarkup: mainMenuKeyboard(),
   });

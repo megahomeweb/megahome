@@ -13,7 +13,11 @@ interface ProductProps {
 }
 
 const ProductCard = ({product}: ProductProps) => {
-  const { isAuthenticated } = useAuthStore();
+  // Subscribing to userData (not just the helper fns) so the card
+  // re-renders the moment the admin approves the prospect.
+  const { isAuthenticated, canSeePrices, isProspect } = useAuthStore();
+  const showPrice = canSeePrices();
+  const prospect = isProspect();
 
   const hasStock = product.stock !== undefined && product.stock !== null;
   const outOfStock = hasStock && (product.stock as number) <= 0;
@@ -62,14 +66,21 @@ const ProductCard = ({product}: ProductProps) => {
         <h3 className='font-semibold text-sm sm:text-base text-gray-900 line-clamp-1 mb-1'>
           {product.title}
         </h3>
-        {isAuthenticated ? (
+        {showPrice ? (
           <p className='font-bold text-[#00bad8] text-sm sm:text-base'>
             {formatUZS(product.price)}
           </p>
-        ) : (
+        ) : prospect ? (
+          <p className='text-xs font-medium text-amber-600'>
+            Narx tasdiqlangach ochiladi
+          </p>
+        ) : !isAuthenticated ? (
           <p className='text-xs text-gray-400'>
             Narxni ko&apos;rish uchun kiring
           </p>
+        ) : (
+          // Authenticated but profile doc still loading — neutral placeholder
+          <p className='text-xs text-gray-300'>—</p>
         )}
       </div>
     </Link>

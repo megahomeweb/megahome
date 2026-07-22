@@ -154,9 +154,14 @@ const LoginForm = () => {
 
     // Defensive: if a non-admin email somehow has role='admin' in
     // Firestore (legacy data, manual tampering), strip it. Admin access
-    // is governed by the hardcoded email check, not the doc.
+    // is governed by the hardcoded email check, not the doc. Must keep
+    // 'prospect' intact — normalizing it to 'user' here would unlock
+    // wholesale prices client-side before the admin ever approved them.
     if (!isAdminEmail(firebaseUser.email)) {
-      userData.role = userData.role === 'manager' ? 'manager' : 'user'
+      userData.role =
+        userData.role === 'manager' || userData.role === 'prospect'
+          ? userData.role
+          : 'user'
     }
 
     // For non-admin users we do NOT need a server cookie — they don't

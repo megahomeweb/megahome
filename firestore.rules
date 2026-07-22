@@ -61,10 +61,16 @@ service cloud.firestore {
     // customer profile flows allow self-correction. The narrow
     // phone-dedupe-oracle risk is mitigated by customers/create being
     // admin-only at the API layer.
+    // CREATE: public self-signup is forced to role='prospect' (Ehtimoliy
+    // foydalanuvchi — no prices until the admin approves). This also
+    // closes the old hole where a crafted signup request could self-create
+    // with role='manager' and gain staff-level read access. The admin may
+    // create their own doc with any role (LoginForm auto-provisions the
+    // admin profile) and may create POS customer docs with role='user'.
     match /user/{userId} {
       allow read: if isOwner(userId) || isStaff();
-      allow create: if isOwner(userId)
-        || (isAdmin() && request.resource.data.role == 'user');
+      allow create: if (isOwner(userId) && request.resource.data.role == 'prospect')
+        || (isAdmin() && (isOwner(userId) || request.resource.data.role == 'user'));
       allow update: if (isOwner(userId)
           && request.resource.data.role == resource.data.role
           && request.resource.data.email == resource.data.email

@@ -67,7 +67,7 @@ providers/            # AuthProvider (Firebase onAuthStateChanged)
 ```
 
 ## Firebase Collections
-- **"user"**: `{name, email, uid, role: "admin"|"user", phone, time, date}`
+- **"user"**: `{name, email, uid, role: "admin"|"manager"|"user"|"prospect", phone, time, date, approvedAt?, approvedBy?}`
 - **"categories"**: `{id, name, description, categoryImgUrl[], storageFileId, subcategory[]}`
 - **"products"**: `{id, title, price, costPrice?, productImageUrl[], category, description, quantity, stock?, time, date, storageFileId, subcategory}`
 - **"orders"**: `{id, clientName, clientPhone, date, basketItems[], totalPrice, totalQuantity, userUid, status?}`
@@ -75,7 +75,8 @@ providers/            # AuthProvider (Firebase onAuthStateChanged)
 - **"invoices"**: Generated invoices (schyot-faktura)
 
 ## Auth Flow
-1. Signup creates Firebase Auth user + Firestore "user" doc (default role: "user")
+1. Signup creates Firebase Auth user + Firestore "user" doc (default role: "prospect" = Ehtimoliy foydalanuvchi — no prices/cart/orders until approved; rules enforce the value)
+1a. Admin approves from /admin/users (Tasdiqlash) → role "user" + approvedAt/approvedBy stamp → prices unlock (web + Telegram bot). Price gate predicate: `canSeePrices()` in store/authStore.ts
 2. Login authenticates via Firebase → fetches user data → stores in Zustand
 3. ProtectedRoute checks `isAuthenticated` and `isAdmin()` for admin routes
 4. AuthProvider uses `onAuthStateChanged` listener for session persistence

@@ -21,7 +21,7 @@ interface SignUpFormInputs {
   phone: string
 }
 
-type Role = "admin" | "manager" | "user"
+type Role = "admin" | "manager" | "user" | "prospect"
 
 // User type for Firestore
 interface User {
@@ -94,12 +94,16 @@ const SignUpForm = () => {
       const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password)
       const firebaseUser = userCredential.user
       
-      // Firestore uchun user obyektini yaratish
+      // Firestore uchun user obyektini yaratish.
+      // Every self-signup starts as "prospect" (Ehtimoliy foydalanuvchi):
+      // no prices until the admin calls them, agrees the wholesale deal,
+      // and approves them from /admin/users. Firestore rules enforce this
+      // value — a tampered client can't self-create as "user"/"manager".
       const user: User = {
         name: data.name,
         email: firebaseUser.email,
         uid: firebaseUser.uid,
-        role: "user",
+        role: "prospect",
         time: Timestamp.now(),
         date: new Date().toLocaleString(
           "en-US",

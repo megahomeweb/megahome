@@ -2,12 +2,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../ui/button';
 import { BiTrash, BiUser } from 'react-icons/bi';
-import { Phone, ShoppingCart } from 'lucide-react';
+import { Phone, ShoppingCart, UserCheck } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import type { UserData } from '@/store/authStore';
 import { useOrderStore } from '@/store/useOrderStore';
 import toast from 'react-hot-toast';
-import { updateDoc, doc } from 'firebase/firestore';
+import { updateDoc, doc, Timestamp } from 'firebase/firestore';
 import { fireDB, auth } from '@/firebase/config';
 import { useNotificationStore } from '@/store/useNotificationStore';
 import { formatUZS } from '@/lib/formatPrice';
@@ -16,21 +16,23 @@ import { matchesSearch } from '@/lib/searchMatch';
 import Link from 'next/link';
 import Pagination, { usePagination } from './Pagination';
 
-const roleOptions = ["admin", "manager", "user"];
+const roleOptions = ["prospect", "user", "manager", "admin"];
 const roleLabels: Record<string, string> = {
   admin: "Admin",
   manager: "Menejer",
   user: "Foydalanuvchi",
+  prospect: "Ehtimoliy",
 };
 const roleBadge: Record<string, string> = {
   admin: "bg-purple-100 text-purple-700",
   manager: "bg-amber-100 text-amber-700",
   user: "bg-gray-100 text-gray-600",
+  prospect: "bg-orange-100 text-orange-700",
 };
 
 interface UsersTableProps {
   search: string;
-  roleFilter?: 'all' | 'admin' | 'manager' | 'user';
+  roleFilter?: 'all' | 'admin' | 'manager' | 'user' | 'prospect';
 }
 
 const Spinner = () => (
@@ -79,7 +81,11 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
   const filteredUsers = useMemo(() => {
     let filtered = users;
     if (roleFilter !== 'all') {
-      filtered = filtered.filter((u: UserData) => u.role === roleFilter);
+      // Legacy docs written before the role field existed count as
+      // approved customers — surface them under the Mijozlar chip.
+      filtered = filtered.filter((u: UserData) =>
+        roleFilter === 'user' ? (u.role === 'user' || !u.role) : u.role === roleFilter
+      );
     }
     if (search.length >= 2) {
       filtered = filtered.filter((u: UserData) =>
@@ -88,15 +94,18 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
         (u.phone ? u.phone.includes(search) : false)
       );
     }
+    const byNewest = (a: UserData, b: UserData) => {
+      if (a.time && b.time) return b.time - a.time;
+      return 0;
+    };
+    // Prospects lead the list — they're the operator's call queue.
+    const prospects = filtered.filter((u: UserData) => u.role === 'prospect').sort(byNewest);
     const admins = filtered.filter((u: UserData) => u.role === 'admin');
     const managers = filtered.filter((u: UserData) => u.role === 'manager');
     const others = filtered
-      .filter((u: UserData) => u.role !== 'admin' && u.role !== 'manager')
-      .sort((a: UserData, b: UserData) => {
-        if (a.time && b.time) return b.time - a.time;
-        return 0;
-      });
-    return [...admins, ...managers, ...others];
+      .filter((u: UserData) => u.role !== 'admin' && u.role !== 'manager' && u.role !== 'prospect')
+      .sort(byNewest);
+    return [...prospects, ...admins, ...managers, ...others];
   }, [users, search, roleFilter]);
 
   const { page, perPage, setPage, setPerPage, pageItems, total } = usePagination(filteredUsers, 25);
@@ -138,22 +147,35 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
     // (delete users, drop products, see profit margins, change prices). The
     // dropdown is only one tap away from disaster, so make the operator
     // explicitly acknowledge what they're doing.
+    const currentRole = user.role || 'user';
     const isElevation =
-      (user.role === 'user' && (newRole === 'admin' || newRole === 'manager')) ||
-      (user.role === 'manager' && newRole === 'admin');
-    const isDemotion = user.role === 'admin' && newRole !== 'admin';
-    let message = `${user.name} ning rolini ${roleLabels[user.role] || user.role} → ${roleLabels[newRole]} ga o'zgartirmoqchimisiz?`;
+      ((currentRole === 'user' || currentRole === 'prospect') && (newRole === 'admin' || newRole === 'manager')) ||
+      (currentRole === 'manager' && newRole === 'admin');
+    const isDemotion = currentRole === 'admin' && newRole !== 'admin';
+    const isApproval = currentRole === 'prospect' && newRole === 'user';
+    let message = isApproval
+      ? `${user.name} tasdiqlansinmi?\n\nNarxlar ochiladi va buyurtma bera oladi.`
+      : `${user.name} ning rolini ${roleLabels[currentRole] || currentRole} → ${roleLabels[newRole]} ga o'zgartirmoqchimisiz?`;
     if (isElevation && newRole === 'admin') {
       message += "\n\n⚠️ Admin barcha mahsulot, buyurtma va foydalanuvchilarni boshqarishi mumkin.";
     } else if (isDemotion) {
       message += "\n\n⚠️ Admin huquqlari olib tashlanadi. Foydalanuvchi endi admin panelga kira olmaydi.";
+    } else if (newRole === 'prospect') {
+      message += "\n\n⚠️ Narxlar yopiladi va buyurtma bera olmaydi.";
     }
     if (!window.confirm(message)) return;
     setLoadingUserId(user.uid);
     try {
       const userDoc = doc(fireDB, 'user', user.uid);
-      await updateDoc(userDoc, { role: newRole });
-      toast.success(`${user.name} → ${roleLabels[newRole]}`);
+      const payload: { role: string; approvedAt?: Timestamp; approvedBy?: string | null } = { role: newRole };
+      // Audit trail: who approved this prospect and when. Written only on
+      // the prospect → approved transition, not on ordinary role edits.
+      if (currentRole === 'prospect' && newRole !== 'prospect') {
+        payload.approvedAt = Timestamp.now();
+        payload.approvedBy = auth.currentUser?.email ?? null;
+      }
+      await updateDoc(userDoc, payload);
+      toast.success(isApproval ? `${user.name} tasdiqlandi` : `${user.name} → ${roleLabels[newRole]}`);
       if (fetchAllUsers) fetchAllUsers();
     } catch {
       toast.error("Rolni yangilashda xatolik");
@@ -240,15 +262,27 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
                 </td>
                 {/* Role */}
                 <td className="px-4 py-3 text-center">
-                  <select
-                    className={`text-xs font-bold px-3 py-1.5 rounded-lg border-0 cursor-pointer focus:ring-2 focus:ring-blue-500 ${roleBadge[user.role] || roleBadge.user}`}
-                    value={user.role}
-                    onChange={e => handleRoleChange(user, e.target.value)}
-                  >
-                    {roleOptions.map(role => (
-                      <option key={role} value={role}>{roleLabels[role]}</option>
-                    ))}
-                  </select>
+                  <div className="inline-flex items-center gap-1.5">
+                    <select
+                      className={`text-xs font-bold px-3 py-1.5 rounded-lg border-0 cursor-pointer focus:ring-2 focus:ring-blue-500 ${roleBadge[user.role] || roleBadge.user}`}
+                      value={user.role || 'user'}
+                      onChange={e => handleRoleChange(user, e.target.value)}
+                    >
+                      {roleOptions.map(role => (
+                        <option key={role} value={role}>{roleLabels[role]}</option>
+                      ))}
+                    </select>
+                    {user.role === 'prospect' && (
+                      <button
+                        onClick={() => handleRoleChange(user, 'user')}
+                        disabled={loadingUserId === user.uid}
+                        className="inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer disabled:opacity-50 transition-colors"
+                      >
+                        <UserCheck className="size-3.5" />
+                        Tasdiqlash
+                      </button>
+                    )}
+                  </div>
                 </td>
                 {/* Delete */}
                 <td className="px-4 py-3 text-center">
@@ -332,9 +366,19 @@ const UsersTable = ({ search, roleFilter = 'all' }: UsersTableProps) => {
 
             {/* Actions */}
             <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+              {user.role === 'prospect' && (
+                <button
+                  onClick={() => handleRoleChange(user, 'user')}
+                  disabled={loadingUserId === user.uid}
+                  className="flex-1 inline-flex items-center justify-center gap-1 text-xs font-bold px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer disabled:opacity-50 transition-colors"
+                >
+                  <UserCheck className="size-3.5" />
+                  Tasdiqlash
+                </button>
+              )}
               <select
                 className={`flex-1 text-xs font-bold px-3 py-1.5 rounded-lg border-0 cursor-pointer ${roleBadge[user.role] || roleBadge.user}`}
-                value={user.role}
+                value={user.role || 'user'}
                 onChange={e => handleRoleChange(user, e.target.value)}
               >
                 {roleOptions.map(role => (

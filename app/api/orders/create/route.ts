@@ -193,6 +193,20 @@ export async function POST(req: NextRequest) {
     // to role='admin' could place orders attributed to other customers.
     callerIsAdmin = isAdminEmail(callerEmail);
 
+    // Prospects (Ehtimoliy foydalanuvchi) never see prices, so they must
+    // not be able to order by calling this API directly with a valid
+    // token. The UI already blocks them; this is the server boundary.
+    // Role is safe to trust here: the rules only let the ADMIN change it.
+    if (!callerIsAdmin) {
+      const callerDoc = await db.collection('user').doc(callerUid).get();
+      if ((callerDoc.data()?.role ?? 'user') === 'prospect') {
+        return NextResponse.json(
+          { error: 'Hisobingiz hali tasdiqlanmagan' },
+          { status: 403 },
+        );
+      }
+    }
+
     // ── Input parse + validate ─────────────────────────
     let body: RequestBody;
     try {

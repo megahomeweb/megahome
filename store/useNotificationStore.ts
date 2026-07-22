@@ -249,7 +249,9 @@ export const useNotificationStore = create<NotificationState>()(
                   id: `user_${uid}`,
                   refId: uid,
                   type: 'new_user',
-                  title: `Yangi foydalanuvchi: ${data.name}`,
+                  title: data.role === 'prospect'
+                    ? `Yangi ehtimoliy foydalanuvchi: ${data.name}`
+                    : `Yangi foydalanuvchi: ${data.name}`,
                   message: data.phone || data.email || '',
                   detail: data.email || '',
                   timestamp: Date.now(),
